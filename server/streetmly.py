@@ -106,9 +106,20 @@ def _get(net, url, tok):
     return net.get(url, kind="background", headers={"Authorization": f"OAuth {tok}"}, lane=LANE).body
 
 
+def _lit(im):
+    """True when the photo's own longitude and capture time say the sun was likely up: a night shot is
+    newest first just like everyone else and would otherwise crowd the day's photos out of the tile's
+    twelve looks, while its dark pixels only vote nan."""
+    ts = im.get("captured_at") or 0
+    g = (im.get("computed_geometry") or {}).get("coordinates") or [0.0, 0.0]
+    tod = (ts / 3600000.0 + g[0] / 15.0) % 24.0          # rough solar time from the photo's longitude
+    return 8.0 <= tod < 20.0
+
+
 def photos(net, tok, lat, lon, half_m):
     """The tile's usable photos, newest first, at most MAX_PHOTOS: perspective cameras with a position, a
-    heading and a thumbnail (panoramas and fisheyes have no usable pinhole)."""
+    heading and a thumbnail (panoramas and fisheyes have no usable pinhole). Daytime photos come first -
+    all-night coverage still gets its (dark, mostly nan-voting) photos, since some looks beat none."""
     dlat = half_m / M_PER_DEG
     dlon = half_m / (M_PER_DEG * max(0.05, math.cos(math.radians(lat))))
     import urllib.parse
@@ -126,6 +137,9 @@ def photos(net, tok, lat, lon, half_m):
             continue
         ok.append(im)
     ok.sort(key=lambda im: -(im.get("captured_at") or 0))
+    day = [im for im in ok if _lit(im)]
+    if len(day) >= MIN_PHOTOS:
+        ok = day
     return ok[:MAX_PHOTOS]
 
 

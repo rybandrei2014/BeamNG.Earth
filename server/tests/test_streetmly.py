@@ -19,6 +19,7 @@ import streetmly  # noqa: E402
 LAT, LON = 39.2834, -76.5934
 FRAME = geodesy.EnuFrame(LAT, LON, 0.0)
 STUCCO = (200, 90, 70)
+DAY_MS = 1730041580000      # (2026-10-27 17:06 UTC: solar noon at LON - the fixture photos are daytime)
 
 # the wall: 8 m wide at 20 m north of the photo, ground to an 8 m eave, facing south (the camera looks north)
 WALL = np.array([[-4.0, 20.0, 0.0], [4.0, 20.0, 0.0], [4.0, 20.0, 8.0], [-4.0, 20.0, 8.0]])
@@ -36,11 +37,12 @@ def photo_jpeg(rgb=STUCCO):
     return buf.getvalue()
 
 
-def meta(e=0.0, n=0.0, pid="p1"):
-    """A Mapillary image record for a camera at frame (e, n) looking north."""
+def meta(e=0.0, n=0.0, pid="p1", captured_at=None):
+    """A Mapillary image record for a camera at frame (e, n) looking north (daytime unless told: the tile
+    prefers photos taken with the sun up)."""
     la, lo, _ = FRAME.enu_to_geodetic(e, n, 0.0)
     return {"id": pid, "computed_geometry": {"coordinates": [float(lo), float(la)]},
-            "compass_angle": 0.0, "captured_at": 1730000000000, "camera_type": "perspective",
+            "compass_angle": 0.0, "captured_at": captured_at or DAY_MS, "camera_type": "perspective",
             "camera_parameters": [1.2, 0.0, 0.0], "is_pano": False, "width": 4000, "height": 3000,
             "thumb_1024_url": f"https://a.mapillary.com/{pid}.jpg", "sequence": "s1"}
 
@@ -115,6 +117,33 @@ class FacadeTest(unittest.TestCase):
         exactly these two fields were once left out of FIELDS, and a city full of photos looked empty."""
         for field in ("computed_compass_angle", "compass_angle"):
             self.assertIn(field, streetmly.FIELDS)
+
+
+class PhotosTest(unittest.TestCase):
+    """photos(): newest first, but a night capture must not crowd the day's photos out of the tile's
+    twelve looks (its dark pixels only vote nan) - and a place photographed only at night still gets
+    its photos, since some looks beat none."""
+
+    def run_photos(self, ims):
+        with mock.patch.object(streetmly, "_get",
+                               lambda net, url, tok: json.dumps({"data": ims}).encode("utf-8")):
+            return [im["id"] for im in streetmly.photos(None, "MLY|tok", LAT, LON, 180.0)]
+
+    def test_day_photos_crowd_the_night_ones_out(self):
+        # 1730000000000 reads solar 22:45 at LON: night; DAY_MS reads 10:00
+        night = [meta(pid=f"n{i}", captured_at=1730000000000 + i) for i in (1, 2)]
+        day = [meta(pid=f"d{i}", captured_at=DAY_MS + i) for i in (1, 2)]
+        self.assertEqual(sorted(self.run_photos(day + night)), ["d1", "d2"])
+
+    def test_all_night_coverage_is_still_asked(self):
+        night = [meta(pid=f"n{i}", captured_at=1730000000000 + i) for i in (1, 2)]
+        self.assertEqual(sorted(self.run_photos(night)), ["n1", "n2"],
+                         "some looks beat none: the kernel decides photo by photo")
+
+    def test_one_day_photo_alone_does_not_hide_the_night_ones(self):
+        day = [meta(pid="d1", captured_at=DAY_MS)]
+        night = [meta(pid=f"n{i}", captured_at=1730000000000 + i) for i in (1, 2)]
+        self.assertEqual(len(self.run_photos(day + night)), 3, "one daytime look is not a set to keep")
 
 
 class TokenTest(unittest.TestCase):
