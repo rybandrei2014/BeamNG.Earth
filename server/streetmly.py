@@ -124,6 +124,32 @@ def photo_rows(net, tok, im, frame, walls):
     return np.asarray(fast.facade_look(rgb, (e, n, AGL_M), yaw, (fx, fy, cx, cy), walls, PARAMS))
 
 
+def colours_file(cache_dir, tx, ty):
+    """The tile's finished colour file (the background job's output; the tile build reads only this)."""
+    return os.path.join(cache_dir, f"bnge_facade_colours_{tx}_{ty}.json")
+
+
+def colours_load(cache_dir, tx, ty):
+    """The finished file's {building id: "#rrggbb"}, or None when the tile has none yet: a tile built before
+    the colours arrive keeps its predicted facades, the next visit wears them."""
+    try:
+        with open(colours_file(cache_dir, tx, ty)) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    col = data.get("colours") if isinstance(data, dict) else None
+    return col if isinstance(col, dict) else None
+
+
+def colours_save(cache_dir, tx, ty, colours):
+    """The background job's finished write: atomic, so a tile build never half-reads it."""
+    path = colours_file(cache_dir, tx, ty)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump({"colours": colours}, fh, sort_keys=True)
+    os.replace(tmp, path)
+
+
 def tile_facade_colours(net, tok, frame, x0, y0, x1, y1, cands):
     """cands: [(attr index, key (the building's id, str), walls (W, 4, 3) frame metres)] of the tile's
     buildings that have no mapped facade colour -> {key: "#rrggbb"} for those the street photos agree on.

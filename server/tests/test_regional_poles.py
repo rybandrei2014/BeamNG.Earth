@@ -206,7 +206,8 @@ class PipelineTest(unittest.TestCase):
             keys.append(key)
             return build()
         def build(*args):
-            forwarded.append(args[-2])          # (pole_profile, then the --roof-colors roof_tex: the last two)
+            forwarded.append(args[-3])          # (the last three: pole_profile, the --roof-colors roof_tex, the
+                                                #  --facade-colours facade)
             return ("/temp/result", 0, [])
         with mock.patch.object(blockworker, "_s", SimpleNamespace(md=None)), \
                 mock.patch.object(blockworker, "_revisit_tile", side_effect=revisit), \

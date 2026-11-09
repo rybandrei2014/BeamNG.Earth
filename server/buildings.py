@@ -2579,7 +2579,7 @@ def _outline_under_parts(at, bparts):
 def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=(), west_town=False, roads_xy=None,
                    tunnels_xy=None, garages_xy=None, supports=None, bridges_xy=None, water_xy=None, decks=None,
                    ml_roads_xy=None, ways_xy=None, skip=frozenset(), min_size=None, own=None, house_land_layers=(),
-                   roof_im=None):
+                    roof_im=None, facade_colors=None):
     """[(Spec, gmin, gmax)] of the buildings whose footprint centroid is in the tile [x0, x1) x [y0, y1) (own: the
     tile's box when it says which points are its own, roads.box_owns: a geotile's)
     (anchor frame), rings relative to (x0, y0). layers: mapgeom.Features of buildings (one per map cell; a
@@ -2593,11 +2593,14 @@ def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=
     canopy, drawn by the mod from the stock levels' props: gasstations.tile_sites). min_size (min height m, min
     footprint m²?): only buildings at least that tall or that large (the skyline tiles: skyline_tile), tested before
     any other work on a building. roof_im: an imagery.Imagery (roofcolor.py, --roof-colors): the buildings with no
-    mapped roof colour sample the tile's aerial photo; None (default): only mapped colours."""
+    mapped roof colour sample the tile's aerial photo; None (default): only mapped colours. facade_colors:
+    {building id: "#rrggbb"} (streetmly.py, --facade-colours): the buildings with no mapped facade colour wear it;
+    None (default): only mapped colours."""
     parts_of = _PartsOf(frame, part_layers)     # building id -> [(ring in the anchor frame, (own height, bottom))]
     seen = set()
     rings, attrs, looks, mins = [], [], [], []
     ridx = [] if roof_im is not None else None  # (attr idx, building id, outline ring): the --roof-colors pass)
+    fidx = [] if facade_colors else None        # (attr idx, building id): the --facade-colours pass)
     for f in layers:
         if f is None or len(f.kind) == 0:
             continue
@@ -2703,6 +2706,8 @@ def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=
                     mins.append(pmh)
                     if ridx is not None and key is not None and not p_rcol:
                         ridx.append((len(attrs) - 1, str(key), np.stack([e, n], 1)))
+                    if fidx is not None and key is not None and not p_fcol:
+                        fidx.append((len(attrs) - 1, str(key)))
                 if key is not None:
                     seen.add(key)
                 if not (PARTS_COVER_ON and _outline_under_parts(at, bparts)
@@ -2754,6 +2759,8 @@ def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=
             mins.append(mh)
             if ridx is not None and key is not None and not at.get("roof_color"):
                 ridx.append((len(attrs) - 1, str(key), np.stack([e, n], 1)))
+            if fidx is not None and key is not None and not at.get("facade_color"):
+                fidx.append((len(attrs) - 1, str(key)))
     if not rings:
         return []
     if ridx:
@@ -2770,6 +2777,15 @@ def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=
         except Exception as ex:
             import logging
             logging.getLogger("earthd.buildings").debug("roof colours: %s: %s", type(ex).__name__, ex)
+    if fidx:
+        # (--facade-colours, streetmly.py: a wall the street photos show clearly paints itself, through the same
+        #  facade_color -> custom_look path a mapped building:facade_colour takes; a mapped one is never a
+        #  candidate. The colours arrive in a finished file the background job made: this path never fetches,
+        #  and a building the photos did not settle keeps its predicted look.)
+        for fidx_i, fkey in fidx:
+            c = facade_colors.get(fkey)
+            if c is not None:
+                attrs[fidx_i] = dict(attrs[fidx_i], facade_color=c)
     # a quay structure alongside a moored ship: a low deck (its scanned height is the ship's flank). The ship may be
     # the next tile's: those are looked for only when this tile has water and a long thin candidate
     piers = [k_ for k_, (r, at) in enumerate(zip(rings, attrs)) if not at.get("ship") and not at.get("ml")
@@ -3635,7 +3651,7 @@ def custom_models(frame, custom, ground, out_dir, vfs_dir, road_ends=None):
 
 
 def road_tile_items(
-    frame, tx, ty, md, ground, decks=None, skip=frozenset(), cache_dir=None, roof_im=None
+    frame, tx, ty, md, ground, decks=None, skip=frozenset(), cache_dir=None, roof_im=None, facade_colors=None
 ):
     """tile_buildings of road tile (tx, ty) (items, custom), from the map cells under it, plus any
     3dmr.eu models found near it by geo-search (threedmr.region_ids/model_position), appended to custom as
@@ -3700,6 +3716,7 @@ def road_tile_items(
         skip=skip,
         house_land_layers=[c.layers.get("land_use") for c in cds],
         roof_im=roof_im,
+        facade_colors=facade_colors,
     )
     custom = []
     if cache_dir is not None:

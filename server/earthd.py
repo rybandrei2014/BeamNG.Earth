@@ -891,7 +891,7 @@ class Server:
                  colormatch="off", credits=None, cache=None, retex_rate=RETEX_RATE, surface=None,
                  mapdata=None, grading=False, road_widths=False, block_pools=(), sidewalks=True, buildings=False, traffic=False, far_pool=None,
                  road_pool=None, airports_db=None, sea=None, vegetation=None, leaf_on=True, season_mode="off",
-                 far_bld_pool=None, gas_stations=False, regional_poles="off", roof_colors=False):
+                 far_bld_pool=None, gas_stations=False, regional_poles="off", roof_colors=False, facade_colors=False):
         """kfun: K(L) for every level (default: the layout's K table); near_radii: the min-level
         radii (default: the layout's); cells: 32 (v1.3.1) or 64 (M1, mesh mode only); tex: texture
         px per level from the finest (default: tex_near, tex_near, tex_far with 32 cells,
@@ -1018,6 +1018,9 @@ class Server:
                           "leaf_on": self.imagery.leaf_on, "season_mode": self.imagery.season_mode,
                           "online": True} if self.roof_colors else None)
         self.roof_im = self.imagery if self.roof_colors else None   # (build_roads_tile without the pool: here)
+        # (--facade-colours, streetmly.py: the tile builds read the finished street-photo colour files the
+        #  background job leaves in the cache; the build path itself never fetches. Off (default): mapped colours)
+        self.facade = bool(facade_colors)
         self.imagery_failures = 0           # tiles that fell back to the palette (network trouble)
         self.imagery_worker = 0             # far textures the far-tile processes rendered (blockworker.far_tile)
         self.fin_worker_hits = deque(maxlen=FIN_WORKER_WINDOW)     # (fin_worker_worth: recent tries found them?)
@@ -2264,7 +2267,7 @@ class Server:
             blockworker.roads_geo, aid, anchor.lat, anchor.lon, anchor.zooms[0], gx, gy, gzoom, self.out_dir,
             self.vfs_dir, self.sidewalks, DETAIL_ROAD_LIFT if self.near_visual == "detail" else 0.0,
             self.buildings, lh, mph, self.anchor_q(anchor) if skin else None, self.gas_stations, buried, lamps,
-            country, content, skin, exact, Server.pole_profile(self), self.roof_tex)
+            country, content, skin, exact, Server.pole_profile(self), self.roof_tex, self.facade)
         t0, waited = time.perf_counter(), []
         try:
             res = poolsmod.result_running(fut, ROAD_TILE_TIMEOUT_S, waited)
@@ -2302,7 +2305,7 @@ class Server:
         return blockworker._geo_content_key(geotiles.geobox(gx, gy).key, gzoom, self.buildings, lh, mph,
                                             self.gas_stations, buried, lamps, country, md=self.mapdata.versions(),
                                             models_dir=self.root, pole_profile=Server.pole_profile(self),
-                                            roof=bool(self.roof_tex))
+                                            roof=bool(self.roof_tex), facade=bool(self.facade))
 
     def geo_prebuilt(self, gx, gy):
         """Is geotile (gx, gy)'s road content in the revisit cache (no worker, no network)? -> its key or None."""
@@ -2351,7 +2354,7 @@ class Server:
         return poolsmod.result_running(submit(
             blockworker.prebuild_geo, gx, gy, gzoom, scratch, self.buildings, lh, mph, self.gas_stations, buried,
             lamps, country, "/temp/beamngEarth/areas_scratch", pole_profile=Server.pole_profile(self),
-            wait_gaps=fast is not None, roof_tex=self.roof_tex), timeout)
+            wait_gaps=fast is not None, roof_tex=self.roof_tex, facade=self.facade), timeout)
 
     def build_roads_tile(self, aid, tx, ty):
         """roads.py: one road tile of anchor aid, written to the session folder. Returns (vfs path,
@@ -2367,7 +2370,7 @@ class Server:
                 self.vfs_dir, self.sidewalks, DETAIL_ROAD_LIFT if self.near_visual == "detail" else 0.0,
                 self.buildings, self.left_hand(anchor), self.mph(anchor), self.anchor_q(anchor),
                 self.gas_stations, self.buried(anchor), self.lamp_region(anchor), self.country(anchor), Server.pole_profile(self, anchor),
-                self.roof_tex)
+                self.roof_tex, self.facade)
             try:
                 # bounded: a worker that never answered held this thread and its roads.Tracker slot for good (4
                 # slots: four hung tiles and no road tile ever again, the loading line at "roads & buildings 0/26")
@@ -8528,6 +8531,7 @@ async def main_async(args):
                     buildings=args.buildings == "on" and args.roads == "on",
                      gas_stations=args.gas_stations == "on" and args.roads == "on",
                      roof_colors=args.roof_colors == "on" and args.buildings == "on" and args.roads == "on",
+                     facade_colors=args.facade_colors == "on" and args.buildings == "on" and args.roads == "on",
                     regional_poles=args.regional_poles,
                     traffic=args.traffic == "on" and args.roads == "on",
                     block_pools=block_pools, far_pool=far_pool, road_pool=road_pool, airports_db=airports_db,
@@ -9127,6 +9131,10 @@ def main():
                     help="the buildings' roofs wear the colour of their own aerial photo (roofcolor.py; needs "
                          "--buildings on): sampled per footprint from the imagery the ground already fetches, "
                          "mapped roof colours unchanged, unclear roofs keep the predicted colour")
+    ap.add_argument("--facade-colors", choices=("on", "off"), default="off",
+                    help="the buildings' facades wear the colour the street photos show (streetmly.py; needs "
+                         "--buildings on): the tile reads the finished colour file the background job left, the "
+                         "build path never fetches; your own Mapillary token ($BNGE_MAPILLARY_TOKEN)")
     ap.add_argument("--regional-poles", choices=("off", "fr-demo", "fr-all", "fr-varied", "europe"), default="off",
                     help="regional furniture: off=stock, fr-demo=50/50 poles, fr-all=concrete poles, "
                          "fr-varied=French kit; europe=country-specific European scenery and Quebec/Turkish STOP lettering; "

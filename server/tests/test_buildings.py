@@ -1839,3 +1839,48 @@ class RoofColorTest(unittest.TestCase):
                              part_layers=[parts])
         self.assertEqual(len(painted), 2, "the part and the outline")
         self.assertTrue(all(self.HEX in m for m in painted), painted)
+
+
+class FacadeColorTest(unittest.TestCase):
+    """--facade-colours (streetmly.py): a finished colour file paints the facades nothing mapped, a mapped
+    building:facade_colour wins, and a building the photos did not settle keeps its predicted look."""
+
+    HEX = "#aa463c"
+    LOOK = "c_0.667_0.275_0.235"
+
+    def setUp(self):
+        import geodesy
+        self.f = geodesy.EnuFrame(39.28, -76.59)
+
+        def ll(x, y, w, d):
+            e = np.array([x, x + w, x + w, x, x]); n = np.array([y, y, y + d, y + d, y])
+            la, lo, _ = self.f.enu_to_geodetic(e, n, 0.0)
+            return np.stack([lo, la], 1)
+        self.ll = ll
+
+    def _facades(self, feats, facade_colors=None, **kw):
+        items = bld.tile_buildings(self.f, 0.0, 0.0, 256.0, 256.0, [feats], lambda la, lo: np.zeros(np.shape(la)),
+                                   facade_colors=facade_colors, **kw)
+        return sorted(str(s.facade) for s, _, _ in items)
+
+    def test_the_street_photos_paint_an_unmapped_facade(self):
+        ring = self.ll(100, 100, 40, 40)
+        b = Feats(["R"], [ring], **{"class": ["house"], "height": [6.0], "min_height": [np.nan]})
+        plain = self._facades(b)
+        painted = self._facades(b, {"R": self.HEX})
+        self.assertEqual(len(painted), len(plain))
+        self.assertTrue(any(self.LOOK in m for m in painted), painted)
+        self.assertFalse(any(self.LOOK in m for m in plain), "without the colour file: as before")
+
+    def test_a_mapped_facade_colour_wins(self):
+        ring = self.ll(100, 100, 40, 40)
+        b = Feats(["R"], [ring], **{"class": ["house"], "height": [6.0], "min_height": [np.nan],
+                                    "facade_color": ["#00ff00"]})
+        got = self._facades(b, {"R": self.HEX})
+        self.assertTrue(any("c_0.000_1.000_0.000" in m for m in got), got)
+        self.assertFalse(any(self.LOOK in m for m in got), "street colours never overrule a mapped one")
+
+    def test_a_building_the_photos_miss_stays_predicted(self):
+        ring = self.ll(100, 100, 40, 40)
+        b = Feats(["R"], [ring], **{"class": ["house"], "height": [6.0], "min_height": [np.nan]})
+        self.assertEqual(self._facades(b, {"OTHER": self.HEX}), self._facades(b))
