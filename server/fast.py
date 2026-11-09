@@ -16,7 +16,7 @@ except ImportError:         # no binary for this platform / Python: require() sa
     _ef = None
 
 AVAILABLE = _ef is not None
-MIN_VERSION = 169 # the newest kernel signature the server calls (earthd checks it at start)
+MIN_VERSION = 170 # the newest kernel signature the server calls (earthd checks it at start)
 
 
 class NativeMissing(RuntimeError):
@@ -144,3 +144,16 @@ def roof_sample(rgb, off, pts, params):
     require(169, "roof_sample")
     return _ef.roof_sample(np.ascontiguousarray(rgb, np.uint8), np.asarray(off, np.int64),
                            np.ascontiguousarray(pts, np.float64), np.asarray(params, np.float64))
+
+
+def facade_look(rgb, cam, yaw_rad, intr, walls, params):
+    """(W, 5) per-wall facade-colour rows from a street photo's thumbnail (native facadecolor.rs,
+    server/streetmly.py): median r, g, b (0..255), share (mode pixels / the wall's lit pixels) and kept count;
+    a nan row where the wall is unusable or unsure. rgb: (h, w, 3) uint8 (row 0 top); cam: (3) the camera
+    position in scene ENU metres; yaw_rad: the photo's compass heading (rad from north, clockwise);
+    intr: (fx, fy, cx, cy) pixels; walls: (W, 4, 3) the wall quads' corners in the same ENU metres;
+    params: min_h_px, max_off_frac, min_dist_m, l_dark, min_share, min_kept, l_tol, ab_tol."""
+    require(170, "facade_look")
+    return _ef.facade_look(np.ascontiguousarray(rgb, np.uint8), np.asarray(cam, np.float64), float(yaw_rad),
+                           np.asarray(intr, np.float64), np.ascontiguousarray(walls, np.float64),
+                           np.asarray(params, np.float64))
