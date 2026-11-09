@@ -903,7 +903,7 @@ def _tile_parts(mark, frame, tile, zoom, g, buildings, left_hand, mph, gas_stati
             #  a tile built before the colours arrive keeps its predicted facades, the next visit wears them)
             try:
                 import streetmly
-                facade_colors = streetmly.colours_load(cache_dir, tx, ty)
+                facade_colors = streetmly.colours_load(cache_dir, tx, ty, frame)
             except Exception as ex:
                 log.debug("facade colours: tile %s_%s: %s: %s", tx, ty, type(ex).__name__, ex)
         items, _custom = buildingsmod.road_tile_items(frame, tx, ty, _s.md, elev, decks=_tile_decks(bridges, cells, tx, ty),
@@ -1694,12 +1694,14 @@ _facade_pool = None    # (--facade-colours: this process's one background street
 def _facade_job(cache_dir, tx, ty, frame, box, job):
     """(--facade-colours: the walls this tile just built hand their colours to a background thread here: the
     newest street photos, the earthfast kernel, the finished colour file for the next build. The tile being
-    built waits for none of it; a tile that already has the file, or a run without a token or offline, asks
-    for nothing (streetmly.run_job re-checks both at its start, where the fetches happen).)"""
+    built waits for none of it; a tile that already has the file, a run without a token and an offline run
+    ask for nothing (checked here cheaply and re-checked in streetmly.run_job, where the fetches happen -
+    and a job that could not look leaves no file: PLAN.md M3's offline rule).)"""
     global _facade_pool
     try:
         import streetmly
-        if streetmly.token() is None or streetmly.colours_load(cache_dir, tx, ty) is not None:
+        if streetmly.token() is None or getattr(_s.net, "offline", False) \
+                or streetmly.colours_load(cache_dir, tx, ty, frame) is not None:
             return
         if _facade_pool is None:
             from concurrent.futures import ThreadPoolExecutor

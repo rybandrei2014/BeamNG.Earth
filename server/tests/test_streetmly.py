@@ -95,7 +95,14 @@ class FacadeTest(unittest.TestCase):
             raise OSError("no route to graph.mapillary.com")
         net.get = boom
         with mock.patch.object(streetmly, "_get", lambda net, url, tok: net.get(url).body):
-            self.assertEqual(streetmly.tile_facade_colours(net, "MLY|tok", FRAME, 0, 0, 256, 256, CANDS), {})
+            self.assertIsNone(streetmly.tile_facade_colours(net, "MLY|tok", FRAME, 0, 0, 256, 256, CANDS),
+                              "a failed search is not an answer: the tile must keep asking")
+
+    def test_photos_that_all_fail_to_read_leave_the_tile_alone(self):
+        with mock.patch.object(streetmly, "_get", lambda net, url, tok: net.get(url).body):
+            self.assertIsNone(streetmly.tile_facade_colours(
+                FakeNet([meta(pid="p1"), meta(e=2.0, pid="p2")], {}),   # (no JPEGs canned: every read fails)
+                "MLY|tok", FRAME, 0, 0, 256, 256, CANDS))
 
     def test_no_candidates_ask_for_nothing(self):
         self.assertEqual(streetmly.tile_facade_colours(None, "MLY|tok", FRAME, 0, 0, 1, 1, []), {})
@@ -153,8 +160,9 @@ if __name__ == "__main__":
 
 
 class JobTest(unittest.TestCase):
-    """run_job: a tile without a colour file gets one made (or an empty one when nothing agreed), and a tile
-    that already has it asks for nothing."""
+    """run_job: a tile without a colour file gets one made (or an empty one when nothing agreed), a tile that
+    already has it asks for nothing, and a job that could not look (offline, every photo unreadable) leaves
+    no file: a network's bad minute must not answer "nothing agreed" (PLAN.md M3's offline rule)."""
 
     def setUp(self):
         import tempfile
@@ -166,10 +174,14 @@ class JobTest(unittest.TestCase):
                 mock.patch.dict(os.environ, {streetmly.TOKEN_ENV: "MLY|tok"}):
             streetmly.run_job(net, self.dir, 7, 3, FRAME, (0.0, 0.0, 256.0, 256.0),
                               [("B1", np.asarray(WALL[None]))])
-        self.assertEqual(streetmly.colours_load(self.dir, 7, 3), {"B1": streetmly.colours_load(self.dir, 7, 3)["B1"]})
+        got = streetmly.colours_load(self.dir, 7, 3, FRAME)
+        self.assertIsNotNone(got)
+        self.assertIn("B1", got, str(got))
+        self.assertIn("mapdata", streetmly.colours_file(self.dir, 7, 3, FRAME),
+                      "the managed cache counts, evicts and clears it there")
 
     def test_an_existing_file_is_left_alone(self):
-        streetmly.colours_save(self.dir, 7, 3, {})
+        streetmly.colours_save(self.dir, 7, 3, {}, FRAME)
 
         class NoNet:
             def get(self, *a, **kw):
@@ -182,4 +194,36 @@ class JobTest(unittest.TestCase):
                 streetmly, "TOKEN_FILE", os.devnull + "_missing"):
             streetmly.run_job(object(), self.dir, 7, 4, FRAME, (0.0, 0.0, 1.0, 1.0),
                               [("B1", np.asarray(WALL[None]))])
-        self.assertIsNone(streetmly.colours_load(self.dir, 7, 4))
+        self.assertIsNone(streetmly.colours_load(self.dir, 7, 4, FRAME))
+
+    def test_offline_asks_for_nothing_and_writes_nothing(self):
+        class OfflineNet:
+            offline = True
+
+            def get(self, *a, **kw):
+                raise AssertionError("--offline: every request raises at once")
+        with mock.patch.dict(os.environ, {streetmly.TOKEN_ENV: "MLY|tok"}):
+            streetmly.run_job(OfflineNet(), self.dir, 7, 5, FRAME, (0.0, 0.0, 256.0, 256.0),
+                              [("B1", np.asarray(WALL[None]))])
+        self.assertIsNone(streetmly.colours_load(self.dir, 7, 5, FRAME),
+                          "an offline empty file would silence the tile even back online")
+
+    def test_a_job_that_could_not_look_writes_no_file(self):
+        with mock.patch.object(streetmly, "_get", lambda net, url, tok: net.get(url).body), \
+                mock.patch.dict(os.environ, {streetmly.TOKEN_ENV: "MLY|tok"}):
+            streetmly.run_job(FakeNet([meta(pid="p1"), meta(e=2.0, pid="p2")], {}),   # (no JPEGs: reads all fail)
+                              self.dir, 7, 6, FRAME, (0.0, 0.0, 256.0, 256.0), [("B1", np.asarray(WALL[None]))])
+        self.assertIsNone(streetmly.colours_load(self.dir, 7, 6, FRAME))
+
+    def test_a_plain_anchor_tile_names_its_place(self):
+        """Anchor tiles 5_3 mean a different town every session: the numbers alone must not find each other's
+        colours. A geotile key (stable across sessions) ignores the frame."""
+        other = geodesy.EnuFrame(36.1, -115.1, 0.0)           # (Las Vegas, wearing Baltimore's file: no)
+        streetmly.colours_save(self.dir, 5, 3, {"B1": "#aabbcc"}, FRAME)
+        self.assertIsNone(streetmly.colours_load(self.dir, 5, 3, other))
+        self.assertEqual(streetmly.colours_load(self.dir, 5, 3, FRAME), {"B1": "#aabbcc"})
+
+        class Box:
+            key = "g17_52455_35106"
+        streetmly.colours_save(self.dir, Box(), None, {"B2": "#112233"}, FRAME)
+        self.assertEqual(streetmly.colours_load(self.dir, Box(), None, other), {"B2": "#112233"})

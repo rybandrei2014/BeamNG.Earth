@@ -10,7 +10,9 @@ Layout of the cache root (~/.cache/beamng-earth by default):
   dem/ imagery/ colormatch/ deshadow/     MANAGED: tracked, evicted, cleared
   mapdata/            MANAGED too (mapdata.py: layer files and the sources' range blocks; a missing
                       one is a miss, built or fetched again). Not used by earthd yet, so nothing
-                      there is protected as this session's: the walk's mtime is its last use
+                      there is protected as this session's: the walk's mtime is its last use.
+                      mapdata/facade/: the --facade-colours street-photo colour files (streetmly.py;
+                      a missing one the next tile build asks the street photos again)
   gravity/            counted, never evicted or cleared (the 145 MB EGM2008 model, downloaded once)
   airports/           the same (airports.py: OurAirports' CSV files, ~17 MB, the last good copy kept for
                       offline use; airports.py replaces it weekly and deletes the old generation itself)

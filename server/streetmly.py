@@ -16,9 +16,11 @@ colour enters through the existing facade_color -> custom_look path, so nothing 
 The token is the player's own Mapillary client token (settings page, $BNGE_MAPILLARY_TOKEN, or
 ~/.config/beamng-earth/mapillary.token): a shared token behind every player would be a rate-limit and abuse
 problem. Requests carry the project's USER_AGENT through the netfetch session like every other source;
-photos are read-only fuel for colours - only the extracted hexes are kept (the tile's colour file), never
-image bytes in the world cache. The photos are CC BY-SA 4.0 by their contributors (credits.py, SOURCES.md).
-Off (default) and in --offline: nothing here runs.
+photos are read-only fuel for colours - only the extracted hexes are kept (the tile's colour file under the
+managed cache's mapdata/facade/, so a missing one is asked again), never image bytes in the world cache.
+A job that could not look (offline, the search down, every photo unreadable) leaves no file: a network's
+bad minute must not answer "nothing agreed" and silence the tile forever. The photos are CC BY-SA 4.0 by
+their contributors (credits.py, SOURCES.md). Off (default) and in --offline: nothing here runs.
 """
 import json
 import logging
@@ -156,17 +158,24 @@ def photo_rows(net, tok, im, frame, walls):
     return np.asarray(fast.facade_look(rgb, (e, n, AGL_M), yaw, (fx, fy, cx, cy), walls, PARAMS))
 
 
-def colours_file(cache_dir, tx, ty):
+def colours_file(cache_dir, tx, ty, frame=None):
     """The tile's finished colour file (the background job's output; the tile build reads only this). tx:
-    an anchor tile id or a geotiles.GeoBox (its key)."""
-    return os.path.join(cache_dir, f"bnge_facade_colours_{getattr(tx, 'key', tx)}_{ty}.json")
+    an anchor tile id or a geotiles.GeoBox (its key). It lives under the managed cache's mapdata/ (counted,
+    evicted, cleared: a missing one is a miss the next build asks again - never a root file that outlives
+    every clear). A plain anchor tile (no key) names its frame's origin too: the numbers 5_3 mean Baltimore
+    in one session and Las Vegas in the next, and those buildings must not wear each other's colours."""
+    name = f"bnge_facade_colours_{getattr(tx, 'key', tx)}_{ty}"
+    if frame is not None and not hasattr(tx, "key"):
+        la, lo, _u = frame.enu_to_geodetic(0.0, 0.0, 0.0)
+        name += f"@{la:.4f}_{lo:.4f}"
+    return os.path.join(cache_dir, "mapdata", "facade", name + ".json")
 
 
-def colours_load(cache_dir, tx, ty):
+def colours_load(cache_dir, tx, ty, frame=None):
     """The finished file's {building id: "#rrggbb"}, or None when the tile has none yet: a tile built before
     the colours arrive keeps its predicted facades, the next visit wears them."""
     try:
-        with open(colours_file(cache_dir, tx, ty)) as fh:
+        with open(colours_file(cache_dir, tx, ty, frame)) as fh:
             data = json.load(fh)
     except (OSError, ValueError):
         return None
@@ -174,9 +183,10 @@ def colours_load(cache_dir, tx, ty):
     return col if isinstance(col, dict) else None
 
 
-def colours_save(cache_dir, tx, ty, colours):
+def colours_save(cache_dir, tx, ty, colours, frame=None):
     """The background job's finished write: atomic, so a tile build never half-reads it."""
-    path = colours_file(cache_dir, tx, ty)
+    path = colours_file(cache_dir, tx, ty, frame)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as fh:
         json.dump({"colours": colours}, fh, sort_keys=True)
@@ -184,23 +194,31 @@ def colours_save(cache_dir, tx, ty, colours):
 
 
 def run_job(net, cache_dir, tx, ty, frame, box, job):
-    """The background job of one tile (blockworker._facade_job): when the tile has no colour file yet and the
-    player has a token, the street photos are asked and the finished file written - an empty one means
-    "looked, nothing agreed" and stops the next build asking again. The tile build itself never runs this."""
+    """The background job of one tile (blockworker._facade_job): when the tile has no colour file yet, the
+    player has a token and the network is not offline, the street photos are asked and the finished file
+    written - an empty one means "looked, nothing agreed" and stops the next build asking again. The tile
+    build itself never runs this. Offline asks nothing, and a job that could not look (the search failed,
+    every photo read failed) leaves no file either: a network's bad minute is not an answer, and the empty
+    file would silence this tile even after coming back online."""
     import pacer
     tok = token()
-    if tok is None or not job or colours_load(cache_dir, tx, ty) is not None:
+    if tok is None or not job or getattr(net, "offline", False) \
+            or colours_load(cache_dir, tx, ty, frame) is not None:
         return
     pacer.pace()
     cands = [(0, k, np.asarray(w, np.float64)) for k, w in job]
-    colours_save(cache_dir, tx, ty, tile_facade_colours(net, tok, frame, *box, cands))
+    colours = tile_facade_colours(net, tok, frame, *box, cands)
+    if colours is not None:               # (None: could not look - the tile asks again at the next build)
+        colours_save(cache_dir, tx, ty, colours, frame)
 
 
 def tile_facade_colours(net, tok, frame, x0, y0, x1, y1, cands):
     """cands: [(attr index, key (the building's id, str), walls (W, 4, 3) frame metres)] of the tile's
     buildings that have no mapped facade colour -> {key: "#rrggbb"} for those the street photos agree on.
     A building needs MIN_PHOTOS confident wall rows within MAX_SPREAD of each other; one photo, or walls
-    that disagree, keeps its predicted look."""
+    that disagree, keeps its predicted look. None means the job could not look at all (the search failed,
+    or photos were there but every read failed): that is not an answer, and the caller keeps the tile
+    asking. Empty means it looked and nothing agreed."""
     if not cands or tok is None:
         return {}
     keys = np.concatenate([np.full(len(w), j, np.int64) for j, (_i, k, w) in enumerate(cands)])
@@ -211,21 +229,26 @@ def tile_facade_colours(net, tok, frame, x0, y0, x1, y1, cands):
     got = {}
     try:
         ims = photos(net, tok, float(la), float(lo), half)
-        import pacer
-        for im in ims:
-            try:
-                rows = np.asarray(photo_rows(net, tok, im, frame, walls))
-            except Exception as ex:
-                log.debug("facade colour: %s: %s", im.get("id"), ex)
-                continue
-            pacer.pace()
-            for wi, row in enumerate(rows):
-                if not np.isfinite(row[3]):
-                    continue
-                got.setdefault(int(keys[wi]), []).append(row)
     except Exception as ex:
-        log.info("facade colour: %s: %s", type(ex).__name__, ex)   # (the tile stays as it was: predicted roofs)
-        return {}
+        log.info("facade colour: %s: %s", type(ex).__name__, ex)   # (the search itself: the tile stays as it was)
+        return None
+    import pacer
+    read_ok = 0
+    for im in ims:
+        try:
+            rows = np.asarray(photo_rows(net, tok, im, frame, walls))
+        except Exception as ex:
+            log.debug("facade colour: %s: %s", im.get("id"), ex)
+            continue
+        read_ok += 1
+        pacer.pace()
+        for wi, row in enumerate(rows):
+            if not np.isfinite(row[3]):
+                continue
+            got.setdefault(int(keys[wi]), []).append(row)
+    if ims and not read_ok:
+        log.info("facade colour: %d photos, none readable", len(ims))
+        return None                                              # (all reads failed: a network minute, not an answer)
     for j, (_i, key, _w) in enumerate(cands):
         rows = got.get(j)
         if not rows or len(rows) < MIN_PHOTOS:
