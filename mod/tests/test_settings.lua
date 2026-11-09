@@ -342,6 +342,42 @@ settings.uiReset()
 T.check(settings.get('cacheCapGb') == 20, 'uiReset: the cap back to 20 GB')
 
 ------------------------------------------------------------------------------------------
+-- the street colours (server streetmly.py): the "Building colours" switch and the token that never comes back
+
+do
+  local tokens, tConnected, tState = {}, true, nil
+  beamngEarth_core = { _state = function() return stTbl end,
+    streetToken = function(text) tokens[#tokens + 1] = text
+      if not tConnected then return false, 'server not connected' end
+      return true end,
+    streetTokenState = function() return tState end }
+  T.check(settings.defaults().facadeColors == false and settings.get('facadeColors') == false,
+    'building colours: off by default')
+  settings.uiSet('facadeColors', true)
+  T.check(settings.get('facadeColors') == true and files[settings.FILE].facadeColors == true,
+    'building colours: saved to the settings file (cpupin.player_settings reads it at the next start)')
+  local r = settings.uiTokenSet('MLY|abc')
+  T.check(r.ok and tokens[1] == 'MLY|abc', 'uiTokenSet: the typed token goes to the server')
+  r = settings.uiTokenSet('')
+  T.check(r.ok and tokens[2] == '', 'uiTokenSet: an empty box clears the saved one')
+  tConnected = false
+  r = settings.uiTokenSet('MLY|abc')
+  T.check(not r.ok and r.error == 'server not connected', 'uiTokenSet: not connected')
+  beamngEarth_core = nil
+  r = settings.uiTokenSet('MLY|abc')
+  T.check(not r.ok and r.error == 'mod not loaded', 'uiTokenSet: no core')
+  tConnected = true
+  beamngEarth_core = { _state = function() return stTbl end, streetToken = function() return true end,
+    streetTokenState = function() return tState end }
+  tState = { saved = true, seq = 2 }
+  local st = settings.uiState().status
+  T.check(st.street and st.street.saved == true and st.street.token == nil,
+    'uiState: the street state passes through - and it never carries a token')
+  settings.uiReset()
+  T.check(settings.get('facadeColors') == false, 'uiReset: building colours back off')
+end
+
+------------------------------------------------------------------------------------------
 -- the compact HUD draws (permissive imgui stub)
 
 local drawnText = {}

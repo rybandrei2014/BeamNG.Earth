@@ -115,6 +115,7 @@ import roadmesh as roadmeshmod  # noqa: E402
 import roadwidth as roadwidthmod  # noqa: E402
 import revisit as revisitmod  # noqa: E402
 import signstream  # noqa: E402
+import streetmly  # noqa: E402
 import dirsigns as dirsignsmod  # noqa: E402
 import mapdata as mapdatamod  # noqa: E402
 import dem as demmod  # noqa: E402
@@ -5311,6 +5312,7 @@ class Connection:
         self.roads = roadsmod.Tracker()         # road tiles sent to the mod (--roads on)
         self.signs = signstream.Tracker()       # their highway signs (key "s<tx>_<ty>")
         self.signs_on = True                    # the mod's highwaySigns setting (message highway_signs)
+        self.street_seq = 0                     # street_token answers sent (the settings page watches it grow)
         self.refining = set()                   # graded first blocks on their way (refine_first; send_progress)
         self.ground_wait = {}                   # block key -> when its photo was first seen waiting (ground_progress)
         self.veg = vegetationmod.Tracker()      # vegetation tiles sent to the mod (--trees on)
@@ -6478,6 +6480,8 @@ class Connection:
             self.on_cache(msg)
         elif kind == "app_path":                # the settings page's folders: the cache's, the BeamMP launcher's
             self.spawn(self.app_path(msg))
+        elif kind == "street_token":            # the settings page's Mapillary token (streetmly.save_token)
+            self.spawn(self.street_token(msg))
         elif kind == "runtime_profiler":
             mode = msg.get("mode", "full")
             if mode not in ("essential", "full"):
@@ -6669,6 +6673,20 @@ class Connection:
         result = await self.loop.run_in_executor(None, set_app_path, what, path[:1000])
         log.info("app path %s: %s", what, result.get("text"))
         self.send(await self.loop.run_in_executor(None, app_paths_message, self.s.cache_dir, result))
+
+    async def street_token(self, msg):
+        """The settings page's Mapillary client token (streetmly.py, PLAN.md M2): sent with "token" (the typed
+        token; an empty one clears the saved file), or without it for the current state. Always answered with
+        a street_token {saved, seq, error?} - the token itself never comes back and is never logged (the file is
+        the player's own, beside their other configs, the one tools/streetview.py reads too). seq numbers the
+        answers, so the page sees a new one without counting locally."""
+        if "token" in msg:
+            result = await self.loop.run_in_executor(None, streetmly.save_token, str(msg.get("token") or "")[:200])
+            log.info("street token: %s", "saved" if result.get("saved") else "refused")
+        else:
+            result = streetmly.token_state()
+        self.street_seq += 1
+        self.send(dict({"type": "street_token", "seq": self.street_seq}, **result))
 
     def on_cache(self, msg):
         """The settings page: capGb sets the cap (0 = unlimited), clear: true empties the cache (but this
@@ -8510,6 +8528,11 @@ async def main_async(args):
                       args.surface == "on", None, logging.getLogger().level,
                       args.airports == "on", args.sea == "on", NICE_FAR_BUILDINGS, roadsmod.ROADS_IN_GROUND))
     log.info("startup: preparing world folders and services")
+    # (--facade-colours, the settings page's "Building colours" switch: the launch flag wins when given, else the
+    # player's switch read from their settings file like cpupin.player_settings reads the others - next start of
+    # the app, since the flag rides the geotile and revisit keys; BNGE_FACADE_COLORS=on|off forces it for a run)
+    facade_on = (args.facade_colors == "on" or cpupin.player_settings(args.user_dir).get("facade") is True) \
+        and args.buildings == "on" and args.roads == "on"
     server = Server(args.user_dir, args.cache_dir, max(args.workers, getattr(args, "far_max", args.workers)), kfun, args.hysteresis,
                     args.far_radius, fmt,
                     imagery=args.imagery, near_visual=args.near_visual, tex_near=args.tex_near,
@@ -8522,7 +8545,7 @@ async def main_async(args):
                     gravity=(gravitymod.Provider(os.path.join(args.cache_dir, "gravity"), net=net)
                              if args.gravity == "on" else None), net=net,
                     credits=creditsmod.Credits(
-                        facade=args.facade_colors == "on" and args.buildings == "on" and args.roads == "on"
+                        facade=facade_on
                     ) if args.credits == "on" else None, cache=disk,
                     retex_rate=args.retex_rate,
                     surface=(surfacemod.Surface(mapdata) if args.surface == "on" else None),
@@ -8533,7 +8556,7 @@ async def main_async(args):
                     buildings=args.buildings == "on" and args.roads == "on",
                      gas_stations=args.gas_stations == "on" and args.roads == "on",
                      roof_colors=args.roof_colors == "on" and args.buildings == "on" and args.roads == "on",
-                     facade_colors=args.facade_colors == "on" and args.buildings == "on" and args.roads == "on",
+                     facade_colors=facade_on,
                     regional_poles=args.regional_poles,
                     traffic=args.traffic == "on" and args.roads == "on",
                     block_pools=block_pools, far_pool=far_pool, road_pool=road_pool, airports_db=airports_db,
@@ -9136,7 +9159,9 @@ def main():
     ap.add_argument("--facade-colors", choices=("on", "off"), default="off",
                     help="the buildings' facades wear the colour the street photos show (streetmly.py; needs "
                          "--buildings on): the tile reads the finished colour file the background job left, the "
-                         "build path never fetches; your own Mapillary token ($BNGE_MAPILLARY_TOKEN)")
+                         "build path never fetches; your own Mapillary token (settings page, "
+                         "$BNGE_MAPILLARY_TOKEN or ~/.config/beamng-earth/mapillary.token). The settings page's "
+                         "\"Building colours\" switch turns this on too, from the next start of the app")
     ap.add_argument("--regional-poles", choices=("off", "fr-demo", "fr-all", "fr-varied", "europe"), default="off",
                     help="regional furniture: off=stock, fr-demo=50/50 poles, fr-all=concrete poles, "
                          "fr-varied=French kit; europe=country-specific European scenery and Quebec/Turkish STOP lettering; "

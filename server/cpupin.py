@@ -107,6 +107,11 @@ def player_settings(user_dir):
         out["teleport_full"] = env == "1"
     if d.get("models3dmr") is False:
         out["models3dmr"] = False
+    if d.get("facadeColors") is True:              # (the settings page's "Building colours": earthd --facade-colors)
+        out["facade"] = True
+    env = os.environ.get("BNGE_FACADE_COLORS")     # (tests: the switch either way for this run)
+    if env in ("0", "1"):
+        out["facade"] = env == "1"
     return out
 
 

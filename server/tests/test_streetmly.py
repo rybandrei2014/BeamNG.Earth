@@ -115,6 +115,39 @@ class TokenTest(unittest.TestCase):
             self.assertIsNone(streetmly.token())
 
 
+class SaveTokenTest(unittest.TestCase):
+    """save_token / token_state (the settings page's "Building colours"): a real token goes to the file and
+    reads back, junk is refused, an empty text clears the file - and no answer ever carries the token."""
+
+    def setUp(self):
+        import tempfile
+        from contextlib import ExitStack
+        self.file = os.path.join(tempfile.mkdtemp(), "mapillary.token")
+        self.env = ExitStack()
+        self.env.enter_context(mock.patch.dict(os.environ, {streetmly.TOKEN_ENV: ""}))
+        self.env.enter_context(mock.patch.object(streetmly, "TOKEN_FILE", self.file))
+
+    def tearDown(self):
+        self.env.close()
+
+    def test_a_real_token_is_saved_and_read_back(self):
+        self.assertEqual(streetmly.save_token("MLY|abc "), {"saved": True})
+        self.assertEqual(streetmly.token(), "MLY|abc")
+        self.assertEqual(streetmly.token_state(), {"saved": True})
+
+    def test_junk_is_refused_and_nothing_written(self):
+        out = streetmly.save_token("hunter2")
+        self.assertFalse(out["saved"])
+        self.assertIn("MLY|", out["error"])          # the hint, never the token
+        self.assertFalse(os.path.exists(self.file))
+        self.assertEqual(streetmly.token_state(), {"saved": False})
+
+    def test_an_empty_text_clears_the_file(self):
+        streetmly.save_token("MLY|abc")
+        self.assertEqual(streetmly.save_token(""), {"saved": False})
+        self.assertEqual(streetmly.token_state(), {"saved": False})
+
+
 if __name__ == "__main__":
     unittest.main()
 

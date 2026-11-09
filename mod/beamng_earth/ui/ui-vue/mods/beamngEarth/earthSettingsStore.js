@@ -62,6 +62,15 @@ export const settingsSchema = [
     ],
   },
   {
+    name: "Building colours",
+    intro: "The facades can wear the colour their real walls wear, taken from street-level photos of the wall itself. Only the colour is kept - no photo is downloaded to stay, shown, or shared.",
+    items: [
+      { id: "facadeColors", type: "bool", default: false, name: "Street imagery", desc: "Colour the buildings' facades from the newest street-level photos of each wall (Mapillary): the app asks for the photos of the streets around you in the background, and a wall only gets a colour when two photos agree - one photo can be a reflection. Colours mapped in OpenStreetMap always win, and a wall the photos did not settle keeps its predicted colour. Needs Roads and Buildings.",
+        note: "Takes effect the next time you start BeamNG.Earth." },
+      { id: "mapillaryToken", type: "secret", what: "street", name: "Mapillary token", placeholder: "MLY|...", desc: "Your own free Mapillary client token, the one the photos are asked with (mapillary.com, Developer - free to create in a few minutes). The app keeps it in its own config file on this computer: never in the game's settings, never in a log, never sent anywhere but to Mapillary. Save an empty box to remove the saved one; the $BNGE_MAPILLARY_TOKEN variable overrides it. Only the extracted wall colours are kept (the photos are CC BY-SA by their contributors, credited on screen while this is on)." },
+    ],
+  },
+  {
     name: "Interface",
     items: [
       { id: "runtimeProfiler", type: "bool", default: false, name: "Detailed performance profiler", desc: "Continuously collects live frame, worker and network/disk feedback in a resizable window. Closing the window leaves a compact status panel; freezing only holds the display. Choose Essential for basic measurements or Full for detailed traces. Off stops collection." },
@@ -165,8 +174,9 @@ export const settingsSchema = [
 ]
 
 // Each page's icon (the pause menu's side buttons take the icon's name, LayoutMenu's tabs the icon) and its button id
-// (the first keeps the old Mods-tab button's id: settings.lua M.BUTTON_ID, pageExists)
-export const PAGE_ICONS = { Graphics: "eyeOutlineOpened", World: "globe", Interface: "cogOutline",
+// (the first keeps the old Mods-tab button's id: settings.lua M.BUTTON_ID, pageExists). Building colours shares the
+// Graphics eye for now: only icon names the game is known to have (its set cannot be listed from here)
+export const PAGE_ICONS = { Graphics: "eyeOutlineOpened", World: "globe", "Building colours": "eyeOutlineOpened", Interface: "cogOutline",
   Multiplayer: "peopleOutline", Storage: "floppyDisk", "Add-ons": "puzzleModule", Feedback: "bug", About: "info",
   Developer: "code" }
 export const pageId = (name, i) => i === 0 ? "beamngEarth-settings" : "beamngEarth-settings-" + name.toLowerCase()
@@ -204,6 +214,11 @@ export const pathPick = ref(false) // ... from the system's window
 export const pathMsg = ref({})    // path -> the server's last answer { ok, text }
 let pathAnswers = 0               // status.paths.answers when it was sent
 let pathSentAt = 0
+export const tokenText = ref("")   // the street-colours token being typed (never persisted; it goes to the server)
+export const tokenBusy = ref(false) // Save sent, the server's answer awaited
+export const tokenMsg = ref(null)   // the answer to the last save: { ok, text } (text never holds the token)
+let tokenAnswers = 0               // status.street.seq (the server numbers its street_token answers) when sent
+let tokenSentAt = 0
 export const optionConfig = { value: o => o.value, label: o => o.label }    // (BngSelect: our options' fields)
 export const presetLine = computed(() => {
   const p = qualityPresets.find(q => q.id === config.value.quality)
@@ -309,6 +324,16 @@ export function applyState(state) {
     pathMsg.value = { ...pathMsg.value, [pathBusy.value]: { ok: false, text: "No answer from the server" } }
     pathBusy.value = ""
   }
+  const tk = status.value.street
+  if (tokenBusy.value && tk && tk.seq > tokenAnswers) { // the server's answer to the token save (never the token)
+    tokenBusy.value = false
+    if (tk.error) tokenMsg.value = { ok: false, text: tk.error }
+    else tokenMsg.value = { ok: tk.saved === true, text: tk.saved === true ? "Token saved on the app's computer." : "Not saved." }
+    if (tk.saved) tokenText.value = ""                     // the box never shows the saved token back
+  } else if (tokenBusy.value && Date.now() - tokenSentAt > 30000) { // a server without the token, or gone
+    tokenBusy.value = false
+    tokenMsg.value = { ok: false, text: "No answer from the server" }
+  }
   if (state.dev) dev.value = state.dev
 }
 
@@ -338,6 +363,27 @@ export function sendPath(item, pick, text) {
 export function usePath(item) {
   const t = (pathText.value[item.what] || "").trim()
   if (t && !pathBusy.value) sendPath(item, false, t)
+}
+
+// The street-colours Mapillary token ("Building colours"): typed here, saved to the server's own token file
+// (an empty box clears the saved one). The token never comes back: status.street only ever says whether
+// one is saved, so nothing here can echo it. settings.lua uiTokenSet.
+export const tokenSaved = computed(() => !!(status.value.street && status.value.street.saved))
+export function tokenNote() {
+  if (tokenMsg.value) return tokenMsg.value.text
+  if (tokenBusy.value) return "..."
+  if (!status.value.street) return "-"
+  return tokenSaved.value ? "Token saved on the app's computer." : "Nothing saved yet."
+}
+export function saveToken() {
+  if (tokenBusy.value) return
+  tokenAnswers = (status.value.street && status.value.street.seq) || 0
+  tokenMsg.value = null
+  const script = `beamngEarth_settings and beamngEarth_settings.uiTokenSet(${JSON.stringify(tokenText.value.trim())}) or nil`
+  engineLua(script, res => {
+    if (res && res.ok) { tokenBusy.value = true; tokenSentAt = Date.now() }
+    else tokenMsg.value = { ok: false, text: (res && res.error) || "mod not loaded" }
+  })
 }
 
 // typing in a text box: the game's keys off meanwhile

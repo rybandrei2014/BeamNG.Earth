@@ -67,6 +67,38 @@ def token():
     return t if t.startswith("MLY|") else None
 
 
+def save_token(text):
+    """The settings page's token (message street_token): kept in TOKEN_FILE for this and every later run - the
+    same file tools/streetview.py uses - 0600, and never into any log. Empty clears the file, so the env or
+    nothing applies. Anything not starting MLY| is refused. Never returns the token."""
+    t = (text or "").strip() if isinstance(text, str) else ""
+    try:
+        if not t:
+            try:
+                os.remove(TOKEN_FILE)
+            except OSError:
+                pass
+            return {"saved": token() is not None}
+        if not t.startswith("MLY|"):
+            return {"saved": False, "error": "a Mapillary client token starts with MLY|"}
+        os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
+        fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(t)
+        try:
+            os.chmod(TOKEN_FILE, 0o600)    # (Windows: nothing; POSIX: the mode the open may have masked off)
+        except OSError:
+            pass
+        return {"saved": True}
+    except OSError as ex:
+        return {"saved": False, "error": f"cannot write the token file: {type(ex).__name__}"}
+
+
+def token_state():
+    """{saved} for the settings page: whether a token is in use - the token itself never leaves the server."""
+    return {"saved": token() is not None}
+
+
 def _get(net, url, tok):
     """One authorised GET as bytes; its own function so a test can feed canned photos and metadata."""
     return net.get(url, kind="background", headers={"Authorization": f"OAuth {tok}"}, lane=LANE).body

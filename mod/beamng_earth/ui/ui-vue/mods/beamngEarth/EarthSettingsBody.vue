@@ -32,7 +32,7 @@
       v-for="item in rows"
       :key="item.id"
       class="earth-row"
-      :vertical="item.type === 'text' || item.type === 'path' || item.type === 'contributors'"
+      :vertical="item.type === 'text' || item.type === 'path' || item.type === 'secret' || item.type === 'contributors'"
       @mouseenter="setHelp(item)"
       @focusin="setHelp(item)"
     >
@@ -118,6 +118,24 @@
         </div>
         <div class="earth-note" :class="{ 'is-error': pathMsg[item.what] && !pathMsg[item.what].ok }">{{ pathNote(item) }}</div>
       </div>
+
+      <!-- A secret (the street-colours Mapillary token): typed, saved to the server's own file, then never shown
+           again - the server's answers only say whether one is saved (earthSettingsStore.js saveToken) -->
+      <div v-else-if="item.type === 'secret'" class="earth-path">
+        <div class="earth-inline">
+          <BngInput
+            class="earth-path-input"
+            :modelValue="tokenText"
+            :placeholder="item.placeholder"
+            @update:modelValue="val => (tokenText = val)"
+            @focus="typing(true)"
+            @blur="typing(false)"
+            @keydown.enter.stop.prevent="saveToken"
+          />
+          <BngButton :accent="ACCENTS.outlined" :disabled="tokenBusy" @click="saveToken">{{ tokenBusy ? "Saving..." : tokenSaved ? "Replace" : "Save" }}</BngButton>
+        </div>
+        <div class="earth-note" :class="{ 'is-error': tokenMsg && !tokenMsg.ok }">{{ tokenNote() }}</div>
+      </div>
     </BngRow>
 
     <!-- Developer: the overlay presets (session only) -->
@@ -138,6 +156,7 @@ import { BngButton, BngSwitch, BngSlider, BngInput, BngSelect, BngRow, BngCardHe
 import {
   config, dev, help, qualityPresets, devPresets, presetLine, detectedPick, optionConfig, categoryNamed, visibleItems,
   cacheConfirm, cacheBusy, cacheResult, pathText, pathBusy, pathPick, pathMsg,
+  tokenText, tokenBusy, tokenMsg, tokenSaved, saveToken, tokenNote,
   setQuality, presetName, valueOf, selectOption, onSwitchChange, onSliderChange, onNumberEnter, onDevChange, infoValue,
   openFeedback, openLink,
   confirmClearCache, askClearCache, usePath, sendPath, pathNote, typing, applyDevPreset,

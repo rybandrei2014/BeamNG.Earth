@@ -223,6 +223,11 @@ You can help support development by reporting [issues](https://github.com/TecnaG
     horizon or a fixed distance).
   - What loads around you reaches the same distance in every direction (a circle; before it was a square, whose
     corners reached about 40 % farther).
+- **Building colours** settings page: the facades can wear the colour their real walls wear, sampled from the newest
+  street-level photos (Mapillary) of the wall itself. Experimental and off by default; needs your own free Mapillary
+  client token, which the app keeps in its own file on this computer (never in a log). Only the extracted colour is
+  kept, never the photos; the contributors are credited on screen while it is on. Takes effect from the next start
+  of the app.
 - Uses your graphics card for some of the world server's work (colour matching of the photos, compressing the distant
   textures) when it can, so the server needs less of your CPU; without a usable one the CPU does it as before.
 - Offline play from the download cache (with a size cap and "clear cache").

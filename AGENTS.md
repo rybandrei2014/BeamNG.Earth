@@ -51,6 +51,9 @@ Repo: https://github.com/TecnaGamer/BeamNG.Earth. License MIT (`LICENSE`).
 ## Tests and CI
 
 - All server tests (parallel runner with logs): `python tools/run_tests.py [module ...]`
+  (Windows gotcha, seen 2026-11-09: piping the runner's output into PowerShell cmdlets like `| Select-Object`
+  hangs it — the pool never finishes behind the pipe. Run it without a pipe, or batch plain
+  `python -m unittest tests.test_a tests.test_b ...` from `server/` (with `BNGE_SKIP_DRIVE=1`) instead.)
 - One module: `cd server && python -m unittest tests.test_<name>` or `python -m unittest discover -s tests -t tests`
 - Lua tests: `python tools/run_lua_tests.py` (needs `lupa`; or `luajit mod/tests/test_*.lua` individually)
 - Full CI gate (what `quality.yml` runs on ubuntu+windows): `python tools/quality_gate.py`
@@ -73,8 +76,10 @@ Repo: https://github.com/TecnaGamer/BeamNG.Earth. License MIT (`LICENSE`).
 
 - **Rust, not Python.** New server logic goes into `native/earthfast`; Python is argument marshalling only.
   Never keep a Python twin of a Rust kernel. The mod stays Lua.
-- **Branches:** work on `dev`; push `dev` after each tested batch. **Never** push `main`, bump `VERSION`, tag,
+- **Branches:** work on `dev`; a tested batch is pushed to `dev` after each batch. **Never** push `main`, bump `VERSION`, tag,
   or cut releases without an explicit go-ahead for that release. Nothing ships before in-game review.
+- **Never commit or push yourself.** The agent may stage files, but `git commit`/`git push` are the user's — leave the
+  work staged and report what is ready; only commit or push when explicitly told for that exact commit.
 - **Current checkout is on `main`:** switch to `dev` before doing any work unless told otherwise.
 - **Look at the real place first** for any map/geometry fix: aerial photo (`tools/ortho_hi.py LAT LON HALF OUT.png`)
   and Mapillary (`tools/streetview.py fetch/run/compare`) before writing code; compare the game screenshot after.

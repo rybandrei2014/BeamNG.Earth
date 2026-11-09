@@ -54,6 +54,7 @@ import sys
 import time
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import numpy as np
@@ -144,6 +145,9 @@ MOD_TO_SERVER = {
     "cache": {"capGb": F(NUM, OPT), "clear": F(bool, OPT)},
     # 2026-10-25: the settings page's cache folder / BeamMP launcher (apppaths.py): chosen in a window or typed
     "app_path": {"what": F(str, OPT), "pick": F(bool, OPT), "path": F(str, OPT)},
+    # 2026-11-09: the settings page's street-colours Mapillary token (streetmly.py): typed (an empty one clears
+    # the saved file), or without token for the state only; always answered with a street_token
+    "street_token": {"token": F(str, OPT)},
     # the ground's collision patch under another vehicle's collision island off the block (terrainpatch.lua / .py)
     "terrain_patch": {"anchorId": F(int), "key": F(str), "x0": F(NUM), "y0": F(NUM), "x1": F(NUM), "y1": F(NUM)},
     # 2026-11-06: the camera far above the clouds: the cloud shell round the point under it (spaceclouds.lua / .py)
@@ -408,6 +412,9 @@ SERVER_TO_MOD = {
                      # ... and the night side's city lights over the ground (none: none could be had)
                      "lightsShape": F(str, OPT), "lights": F(str, OPT), "lightsMaterial": F(str, OPT)},
     "app_paths": {"cacheDir": F(str), "cacheNext": F(str), "beammp": F(str), "result": F(dict, OPT)},
+    # ... the street-colours token's state (streetmly.py, the settings page's "Building colours"): whether one is
+    # saved and why not - the token itself never comes back over the protocol; seq numbers the answers
+    "street_token": {"saved": F(bool), "seq": F(int), "error": F(str, OPT)},
     "cache": {"v": F(int), "usedBytes": F(int), "capBytes": F(int), "files": F(int), "ready": F(bool),
               "managed": F(bool), "clearedBytes": F(int, OPT),
               "pinnedBytes": F(int, OPT)},     # the saved areas' files (areas.py; kept by a clear)
@@ -1083,6 +1090,26 @@ class ServerMessagesTest(test_server.ServerHarness):
         self.assertIn("clearedBytes", until(lambda m: m["type"] == "cache"))
         c.send({"type": "app_path"})                    # the page's cache folder and BeamMP launcher (no choice made)
         self.assertTrue(until(lambda m: m["type"] == "app_paths")["cacheDir"])
+        # the street-colours token (the settings page's "Building colours", streetmly.py): state, a refused
+        # token, a saved one, a clear - all against a token file of our own, never the player's
+        import streetmly
+        tok_file = os.path.join(self.tmp.name, "mapillary.token")
+        with mock.patch.object(streetmly, "TOKEN_FILE", tok_file), \
+                mock.patch.dict(os.environ, {streetmly.TOKEN_ENV: ""}):
+            c.send({"type": "street_token"})                                              # the page's state ask
+            m0 = until(lambda m: m["type"] == "street_token")
+            self.assertIs(m0["saved"], False)                                   # nothing yet
+            self.assertNotIn("token", m0, "the token itself never comes back")
+            c.send({"type": "street_token", "token": "hunter2"})                          # junk: refused
+            m1 = until(lambda m: m["type"] == "street_token")
+            self.assertIs(m1["saved"], False)
+            self.assertTrue(m1["seq"] > m0["seq"], "seq numbers the answers")
+            c.send({"type": "street_token", "token": "MLY|agreement"})                    # a real one: saved
+            self.assertIs(until(lambda m: m["type"] == "street_token")["saved"], True)
+            with open(tok_file) as fh:
+                self.assertEqual(fh.read(), "MLY|agreement")
+            c.send({"type": "street_token", "token": ""})                                 # empty: cleared
+            self.assertIs(until(lambda m: m["type"] == "street_token")["saved"], False)
         # (shared world building, commented out 2026-10-27)
         # c.send({"type": "share"})                       # a BeamMP session: our group service's port and code
         # self.assertTrue(until(lambda m: m["type"] == "share")["code"])

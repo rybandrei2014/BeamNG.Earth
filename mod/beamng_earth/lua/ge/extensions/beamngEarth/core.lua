@@ -1455,6 +1455,13 @@ local function onMessage(msg)
       cacheClears = cacheClears + 1
       cacheInfo.clearedBytes, cacheInfo.clears = tonumber(msg.clearedBytes) or 0, cacheClears
     end
+  elseif t == 'street_token' then
+    -- the street-colours token's state (server streetmly.py): whether one is saved, and the answer to the last
+    -- save. The message carries no token (the server never sends one back, settings.lua's uiTokenSet); its seq
+    -- numbers the answers, so the page can see a new one. M._street, not a local: core.lua is at LuaJIT's
+    -- 200-local cap of the main chunk (test_scoping)
+    M._street = { saved = msg.saved == true, seq = tonumber(msg.seq) or 0,
+      error = msg.error and tostring(msg.error):sub(1, 200) or nil }
   end
 end
 
@@ -3112,6 +3119,17 @@ function M.appPath(what, pick, path)
   if not what then net.send({ type = 'app_path' })
   elseif pick then net.send({ type = 'app_path', what = what, pick = true })
   else net.send({ type = 'app_path', what = what, path = tostring(path or '') }) end
+  return true
+end
+
+-- The settings page's street-colours token (server streetmly.py, PLAN.md M2): the typed token goes to the server,
+-- which keeps it in its own config file (never here, never in a log); an empty text clears it. Without text:
+-- the state only. The answer is a street_token (streetTokenState().seq grows); it carries { saved }, never a token.
+function M.streetTokenState() return M._street end
+function M.streetToken(text)
+  if not cacheReady() then return false, 'server not connected' end
+  if text == nil then net.send({ type = 'street_token' })
+  else net.send({ type = 'street_token', token = tostring(text) }) end
   return true
 end
 

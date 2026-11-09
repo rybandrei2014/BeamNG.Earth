@@ -8,6 +8,8 @@
 --   beamngEarth_settings.uiDevSet(name, on)    beamngEarth_settings.uiDevPreset(name)  (dev tools)
 --   beamngEarth_settings.uiCacheClear()         -> { ok, error } (the server's download cache)
 --   beamngEarth_settings.uiPathSet(what, pick, path) -> { ok, error } (the cache folder, the BeamMP launcher)
+--   beamngEarth_settings.uiTokenSet(text)            -> { ok, error } (the street-colours Mapillary token, to the
+--     server's own token file; never stored here, never returned, the page learns only "saved" via status.street)
 --   beamngEarth_settings.setPageExists(true)   (index.js, once the button is registered)
 --   beamngEarth_settings.uiPlaces() / uiPlaceAddHere(name) / uiPlaceAdd(name, "lat, lon") /
 --     uiPlaceRename(id, name) / uiPlaceDelete(id) / uiPlaceGo(id) / uiPlaceGoText("lat, lon") /
@@ -90,6 +92,11 @@ M.SCHEMA = {
   -- the 3D models of landmarks from the open library 3dmr.eu (server threedmr.py; cpupin.player_settings reads it from
   -- this file when the server starts): off leaves the procedural buildings there, the player's own local models stay
   models3dmr = { kind = 'bool', default = true, label = '3D models from 3dmr.eu' },
+  -- the facades wearing the colour the street photos show (server streetmly.py, PLAN.md M2; cpupin.player_settings
+  -- reads this switch from this file when the server starts, like serverCores: the next start of the app). The token
+  -- itself is NOT stored here (not in this file, not in any log): it goes to the server (the 'street_token' message)
+  -- and lives in ~/.config/beamng-earth/mapillary.token, which the server re-reads on every look
+  facadeColors = { kind = 'bool', default = false, label = 'Building colours from street photos' },
   directionSigns = { kind = 'bool', default = true, label = 'Direction signs' },
   -- anonymous usage statistics (server telemetry.py: players online, data-source load; the server reads this file
   -- before every report, cpupin.player_settings, so the switch holds from the next report on, even at its start)
@@ -147,6 +154,7 @@ M.ORDER = { 'quality', 'framePacing', 'terrainDetail', 'groundPhoto', 'trees', '
   'grassDistance', 'nightLights', 'distantTraffic', 'distantTrafficWithoutTraffic', 'distantTrafficQuality', 'rebaseDistance',
   'viewDistanceMode', 'viewDistanceKm', 'hazeStrength', 'skyMode', 'clouds',
   'weatherMode', 'realGravity', 'groundCover', 'groundCoverDensity', 'rocks', 'roads', 'highwaySigns', 'directionSigns', 'models3dmr',
+  'facadeColors',
   'dashboardSatellite',
   'hudVisible', 'statusBar', 'profilerMode', 'runtimeProfiler',
   'placeNamesOnline', 'telemetry', 'telemetryPerf', 'telemetryNet', 'mapStyle', 'creditsVisible', 'beammpOnLaunch',
@@ -624,6 +632,8 @@ function M.uiState()
   -- the cache folder and the BeamMP launcher (the server's app_paths), asked with the cache numbers
   if core and core.appPath and cachePolls % M.CACHE_POLL == 1 then core.appPath() end
   status.paths = core and core.appPathState and core.appPathState() or nil
+  -- the street-colours token (server streetmly.py): { saved, answers, result } - the token itself is never here
+  status.street = core and core.streetTokenState and core.streetTokenState() or nil
   local schema = {}
   for _, k in ipairs(M.ORDER) do
     local s = M.SCHEMA[k]
@@ -662,6 +672,18 @@ function M.uiPathSet(what, pick, path)
   local core = ext('beamngEarth_core')
   if not (core and core.appPath) then return { ok = false, error = 'mod not loaded' } end
   local sent, why = core.appPath(what, pick == true, path)
+  if not sent then return { ok = false, error = why or 'server not connected' } end
+  return { ok = true }
+end
+
+-- The settings page's Mapillary token ("Building colours", PLAN.md M2): it goes straight to the server (which
+-- keeps it in its own config file and re-reads that on every look) - it is never stored in FILE and never
+-- returned, so it reaches no log and no settings dump. The answer (core.streetTokenState().answers + 1) says
+-- only whether it was saved. An empty text clears the saved token.
+function M.uiTokenSet(text)
+  local core = ext('beamngEarth_core')
+  if not (core and core.streetToken) then return { ok = false, error = 'mod not loaded' } end
+  local sent, why = core.streetToken(tostring(text or ''))
   if not sent then return { ok = false, error = why or 'server not connected' } end
   return { ok = true }
 end

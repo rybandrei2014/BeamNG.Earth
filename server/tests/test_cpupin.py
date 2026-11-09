@@ -199,3 +199,24 @@ class PlayerSettingsTest(unittest.TestCase):
         with open(os.path.join(mod, "ui", "ui-vue", "mods", "beamngEarth", "earthSettingsStore.js"),
                   encoding="utf-8") as f:
             self.assertTrue(re.search(r'\{ id: "models3dmr", type: "bool", default: true,', f.read()), "the page's row")
+
+    def test_facade_colours_switch(self):
+        # the page's "Building colours" (settings.lua facadeColors, off by default): on means earthd runs
+        # --facade-colors too (player_settings -> the facade_on there; the next start of the app)
+        self.assertEqual(cpupin.player_settings(self.write({"facadeColors": True})), {"facade": True})
+        self.assertEqual(cpupin.player_settings(self.write({"facadeColors": False})), {}, "off: the default")
+        self.assertEqual(cpupin.player_settings(self.write({})), {}, "absent: the default")
+        with mock.patch.dict(os.environ, {"BNGE_FACADE_COLORS": "1"}):
+            self.assertEqual(cpupin.player_settings(self.write({})), {"facade": True}, "forced on for a run")
+        with mock.patch.dict(os.environ, {"BNGE_FACADE_COLORS": "0"}):
+            self.assertEqual(cpupin.player_settings(self.write({"facadeColors": True})), {"facade": False},
+                             "forced off")
+        import re
+        mod = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "mod",
+                           "beamng_earth")
+        with open(os.path.join(mod, "lua", "ge", "extensions", "beamngEarth", "settings.lua"), encoding="utf-8") as f:
+            self.assertRegex(f.read(), r"facadeColors = \{ kind = 'bool', default = false,")
+        with open(os.path.join(mod, "ui", "ui-vue", "mods", "beamngEarth", "earthSettingsStore.js"),
+                  encoding="utf-8") as f:
+            self.assertTrue(re.search(r'\{ id: "facadeColors", type: "bool", default: false,', f.read()),
+                            "the page's row")
