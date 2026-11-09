@@ -110,6 +110,12 @@ class FacadeTest(unittest.TestCase):
     def test_no_token_asks_for_nothing(self):
         self.assertEqual(streetmly.tile_facade_colours(object(), None, FRAME, 0, 0, 1, 1, CANDS), {})
 
+    def test_the_search_asks_for_the_angles(self):
+        """Without a heading on the records not one wall can be projected and every photo is skipped:
+        exactly these two fields were once left out of FIELDS, and a city full of photos looked empty."""
+        for field in ("computed_compass_angle", "compass_angle"):
+            self.assertIn(field, streetmly.FIELDS)
+
 
 class TokenTest(unittest.TestCase):
     def test_env_wins_and_junk_is_no_token(self):

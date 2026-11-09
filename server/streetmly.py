@@ -37,7 +37,7 @@ API = "https://graph.mapillary.com/images"
 TOKEN_ENV = "BNGE_MAPILLARY_TOKEN"
 TOKEN_FILE = os.path.expanduser("~/.config/beamng-earth/mapillary.token")
 FIELDS = ("id,computed_geometry,captured_at,camera_type,camera_parameters,is_pano,thumb_1024_url,"
-          "width,height,sequence")
+          "width,height,sequence,computed_compass_angle,compass_angle")
 LANE = "streetmly"        # (netfetch lane: Mapillary's own bucket, so a photo outage never parks the map data)
 
 AGL_M = 2.0            # m: street photos sit on a car roof or a dashboard (tools/streetview.py:46)

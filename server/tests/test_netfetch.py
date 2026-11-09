@@ -750,6 +750,15 @@ class PolicyTest(unittest.TestCase):
         self.assertFalse(nf.DEFAULT_POLICY.allow_prefetch)
         self.assertLessEqual(nf.DEFAULT_POLICY.rate, 2.0)
 
+    def test_the_per_player_cdn_edges_share_one_row(self):
+        """Mapillary's thumbnails come from the Facebook edge nearest the player (streetmly.py): the name
+        differs per town (scontent.fbrq1-1 here), so one suffix row politely covers every edge of theirs."""
+        f, clock, sleep, tr = fetcher()
+        self.assertIs(f.policy("scontent.fbrq1-1.fna.fbcdn.net"), nf.SUFFIX_POLICIES[".fbcdn.net"])
+        self.assertIs(f.policy("scontent.fprg2-1.fna.fbcdn.net#streetmly"), nf.SUFFIX_POLICIES[".fbcdn.net"])
+        self.assertEqual(f.policy("graph.mapillary.com"), nf.POLICIES["graph.mapillary.com"])
+        self.assertEqual(f.policy("fbcdn.net.attacker.example"), nf.DEFAULT_POLICY)
+
     def test_policies_match_the_plan(self):
         """docs/research/2026-10-10-rate-limits.md §5.2 for the hosts in use, raised 2026-10-16 (USGS again 2026-10-23)
         (docs/research/2026-10-16-rate-limits-raised.md); EOX again 2026-10-30 (the user's OK)."""

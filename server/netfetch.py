@@ -316,6 +316,18 @@ POLICIES[_CDN_HOST] = HostPolicy(rate=50.0, burst=200.0, max_conc=16, daily_budg
 # tile hosts made a fresh French place load ~3 far tiles/s (Paris on the 3D map: 198 s, 2026-11-07)
 POLICIES["data.geopf.fr"] = replace(POLICIES["data.geopf.fr"], rate=25.0, burst=50.0, max_conc=12,
                                     daily_budget=100000)
+# Mapillary (streetmly.py, --facade-colours): the search lane (one request per tile's background job - the
+# bucket must be big enough that a drive's worth of jobs passes it, and the lane's own bucket parks nothing
+# else). Its thumbnails come from a regional Facebook CDN edge whose name differs per player (fbrq1 here):
+# SUFFIX_POLICIES below matches *.fbcdn.net, the same etiquette for every edge.
+POLICIES["graph.mapillary.com"] = HostPolicy(rate=2.5, burst=16.0, max_conc=2, daily_budget=6000, daily_hard=10000,
+                                             allow_prefetch=True, timeout=30.0, max_attempts=2, base_delay=2.0,
+                                             breaker_threshold=6, breaker_window=120.0, optional=True)
+# Hosts no exact row can name because they are chosen per player (a CDN edge near them): policy() falls back
+# to these for any host ending in the suffix. One polite row covers every edge of one service.
+SUFFIX_POLICIES = {".fbcdn.net": HostPolicy(rate=8.0, burst=32.0, max_conc=4, daily_budget=30000, daily_hard=50000,
+                                            allow_prefetch=True, timeout=30.0, max_attempts=2, base_delay=2.0,
+                                            breaker_threshold=6, breaker_window=120.0, optional=True)}
 DEFAULT_POLICY = HostPolicy()
 
 # What each source gives the world, and what the player gets while it does not answer (the user, 2026-10-27: "in case
@@ -359,6 +371,7 @@ ROLES = {
     "raw.githubusercontent.com": "the update check",
     "api.github.com": "one-click updates",
     "github.com": "one-click updates",
+    "graph.mapillary.com": "street-photo facade colours (the buildings' painted walls stay as predicted)",
 }
 
 
@@ -377,6 +390,9 @@ def role_of(host):
     for name, (url, *_rest) in imagery_regional.REGIONAL.items():
         if urllib.parse.urlsplit(url).hostname == host:
             return f"{imagery_regional.PLACE.get(name, name)}'s detailed aerial photos; coarser photos meanwhile"
+    for suffix in SUFFIX_POLICIES:                       # (the per-player CDN edges share their service's role)
+        if host.endswith(suffix):
+            return "street-photo facade colours (the buildings' painted walls stay as predicted)"
     return None
 
 
@@ -974,7 +990,14 @@ class Fetcher:
     # --- hosts and policies ------------------------------------------------------------------
     def policy(self, host):
         # (a lane, "host#name": the host's own policy, its own bucket and breaker: get's lane)
-        return self.policies.get(host.split("#", 1)[0], self.default_policy)
+        h = host.split("#", 1)[0]
+        p = self.policies.get(h)
+        if p is not None:
+            return p
+        for suffix, sp in SUFFIX_POLICIES.items():       # (per-player CDN edges: scontent.<region>.fbcdn.net)
+            if h.endswith(suffix):
+                return sp
+        return self.default_policy
 
     def host(self, name):
         with self._lock:
