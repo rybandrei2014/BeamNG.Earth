@@ -900,17 +900,20 @@ def _tile_parts(mark, frame, tile, zoom, g, buildings, left_hand, mph, gas_stati
         facade_job = [] if facade and cache_dir is not None else None
         if facade and cache_dir is not None:
             # (--facade-colours: the finished file the background streetmly job left for this tile, if any:
-            #  a tile built before the colours arrive keeps its predicted facades, the next visit wears them)
+            #  a tile built before the colours arrive keeps its predicted facades, the next visit wears them.
+            #  The file lives in the download cache (_s.cache_dir) - NOT in the cache_dir argument, which in
+            #  geotile mode is the session's scratch: colours asked there would be thrown away every run
+            #  and asked of the street photos again)
             try:
                 import streetmly
-                facade_colors = streetmly.colours_load(cache_dir, tx, ty, frame)
+                facade_colors = streetmly.colours_load(_s.cache_dir, tx, ty, frame)
             except Exception as ex:
                 log.debug("facade colours: tile %s_%s: %s: %s", tx, ty, type(ex).__name__, ex)
         items, _custom = buildingsmod.road_tile_items(frame, tx, ty, _s.md, elev, decks=_tile_decks(bridges, cells, tx, ty),
                                                       skip=skip, cache_dir=cache_dir, roof_im=roof_im,
                                                       facade_colors=facade_colors, facade_job=facade_job)
         if facade_job:
-            _facade_job(cache_dir, tx, ty, frame, box, facade_job)
+            _facade_job(_s.cache_dir, tx, ty, frame, box, facade_job)
         _bridge_fps = buildingsmod.bridge_footprints(frame, tx, ty, cache_dir)
         if any(m in {c["id"] for c in _custom} for _fp, _c, m in _bridge_fps):
             try:            # (the tile that bakes the model: where the mapped bridge meets the roads)
@@ -1689,6 +1692,7 @@ def _geo_exact(aid, lat, lon, gx, gy, out_dir, vfs_dir, parts):
 
 
 _facade_pool = None    # (--facade-colours: this process's one background street-photo job at a time)
+_facade_no_tok = False    # (--facade-colours: the switch is on but this process has said "no token" once already)
 
 
 def _facade_job(cache_dir, tx, ty, frame, box, job):
@@ -1697,10 +1701,17 @@ def _facade_job(cache_dir, tx, ty, frame, box, job):
     built waits for none of it; a tile that already has the file, a run without a token and an offline run
     ask for nothing (checked here cheaply and re-checked in streetmly.run_job, where the fetches happen -
     and a job that could not look leaves no file: PLAN.md M3's offline rule).)"""
-    global _facade_pool
+    global _facade_pool, _facade_no_tok
     try:
         import streetmly
-        if streetmly.token() is None or getattr(_s.net, "offline", False) \
+        if streetmly.token() is None:
+            if not _facade_no_tok:
+                _facade_no_tok = True
+                log.info("facade colours: the switch is on, but there is no Mapillary token: type one on the "
+                         "settings page's Building colours page (or set %s); until then nothing is asked",
+                         streetmly.TOKEN_ENV)
+            return
+        if getattr(_s.net, "offline", False) \
                 or streetmly.colours_load(cache_dir, tx, ty, frame) is not None:
             return
         if _facade_pool is None:

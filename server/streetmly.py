@@ -208,8 +208,17 @@ def run_job(net, cache_dir, tx, ty, frame, box, job):
     pacer.pace()
     cands = [(0, k, np.asarray(w, np.float64)) for k, w in job]
     colours = tile_facade_colours(net, tok, frame, *box, cands)
-    if colours is not None:               # (None: could not look - the tile asks again at the next build)
-        colours_save(cache_dir, tx, ty, colours, frame)
+    if colours is None:               # (could not look - the tile asks again at the next build)
+        log.info("facade colour: tile %s_%s: could not look (offline, or the photos would not load): asking again",
+                 getattr(tx, "key", tx), ty)
+        return
+    colours_save(cache_dir, tx, ty, colours, frame)
+    if colours:
+        log.info("facade colour: tile %s_%s: the street photos settled %d of %d buildings",
+                 getattr(tx, "key", tx), ty, len(colours), len(job))
+    else:
+        log.debug("facade colour: tile %s_%s: looked, nothing agreed (%d walls asked)",
+                  getattr(tx, "key", tx), ty, len(job))
 
 
 def tile_facade_colours(net, tok, frame, x0, y0, x1, y1, cands):

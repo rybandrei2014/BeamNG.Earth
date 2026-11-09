@@ -8533,6 +8533,14 @@ async def main_async(args):
     # the app, since the flag rides the geotile and revisit keys; BNGE_FACADE_COLORS=on|off forces it for a run)
     facade_on = (args.facade_colors == "on" or cpupin.player_settings(args.user_dir).get("facade") is True) \
         and args.buildings == "on" and args.roads == "on"
+    if facade_on and streetmly.token() is None:
+        log.info("building colours: street-photo facades are on, but no Mapillary token was found: type one on "
+                 "the settings page's Building colours page (or set %s) - until then facades stay as predicted",
+                 streetmly.TOKEN_ENV)
+    if args.roof_colors == "on" or facade_on:
+        log.info("building colours: roofs from the aerial photos %s, facades from the street photos %s",
+                 "on" if args.roof_colors == "on" and args.buildings == "on" and args.roads == "on" else "off",
+                 "on" if facade_on else "off")
     server = Server(args.user_dir, args.cache_dir, max(args.workers, getattr(args, "far_max", args.workers)), kfun, args.hysteresis,
                     args.far_radius, fmt,
                     imagery=args.imagery, near_visual=args.near_visual, tex_near=args.tex_near,
