@@ -125,8 +125,9 @@ def photo_rows(net, tok, im, frame, walls):
 
 
 def colours_file(cache_dir, tx, ty):
-    """The tile's finished colour file (the background job's output; the tile build reads only this)."""
-    return os.path.join(cache_dir, f"bnge_facade_colours_{tx}_{ty}.json")
+    """The tile's finished colour file (the background job's output; the tile build reads only this). tx:
+    an anchor tile id or a geotiles.GeoBox (its key)."""
+    return os.path.join(cache_dir, f"bnge_facade_colours_{getattr(tx, 'key', tx)}_{ty}.json")
 
 
 def colours_load(cache_dir, tx, ty):
@@ -150,6 +151,19 @@ def colours_save(cache_dir, tx, ty, colours):
     os.replace(tmp, path)
 
 
+def run_job(net, cache_dir, tx, ty, frame, box, job):
+    """The background job of one tile (blockworker._facade_job): when the tile has no colour file yet and the
+    player has a token, the street photos are asked and the finished file written - an empty one means
+    "looked, nothing agreed" and stops the next build asking again. The tile build itself never runs this."""
+    import pacer
+    tok = token()
+    if tok is None or not job or colours_load(cache_dir, tx, ty) is not None:
+        return
+    pacer.pace()
+    cands = [(0, k, np.asarray(w, np.float64)) for k, w in job]
+    colours_save(cache_dir, tx, ty, tile_facade_colours(net, tok, frame, *box, cands))
+
+
 def tile_facade_colours(net, tok, frame, x0, y0, x1, y1, cands):
     """cands: [(attr index, key (the building's id, str), walls (W, 4, 3) frame metres)] of the tile's
     buildings that have no mapped facade colour -> {key: "#rrggbb"} for those the street photos agree on.
@@ -165,12 +179,14 @@ def tile_facade_colours(net, tok, frame, x0, y0, x1, y1, cands):
     got = {}
     try:
         ims = photos(net, tok, float(la), float(lo), half)
+        import pacer
         for im in ims:
             try:
                 rows = np.asarray(photo_rows(net, tok, im, frame, walls))
             except Exception as ex:
                 log.debug("facade colour: %s: %s", im.get("id"), ex)
                 continue
+            pacer.pace()
             for wi, row in enumerate(rows):
                 if not np.isfinite(row[3]):
                     continue

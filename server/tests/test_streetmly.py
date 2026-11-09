@@ -117,3 +117,36 @@ class TokenTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JobTest(unittest.TestCase):
+    """run_job: a tile without a colour file gets one made (or an empty one when nothing agreed), and a tile
+    that already has it asks for nothing."""
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+
+    def test_a_missing_file_is_made(self):
+        net = FakeNet([meta(pid="p1"), meta(e=2.0, pid="p2")], {"p1.jpg": photo_jpeg(), "p2.jpg": photo_jpeg()})
+        with mock.patch.object(streetmly, "_get", lambda net, url, tok: net.get(url).body), \
+                mock.patch.dict(os.environ, {streetmly.TOKEN_ENV: "MLY|tok"}):
+            streetmly.run_job(net, self.dir, 7, 3, FRAME, (0.0, 0.0, 256.0, 256.0),
+                              [("B1", np.asarray(WALL[None]))])
+        self.assertEqual(streetmly.colours_load(self.dir, 7, 3), {"B1": streetmly.colours_load(self.dir, 7, 3)["B1"]})
+
+    def test_an_existing_file_is_left_alone(self):
+        streetmly.colours_save(self.dir, 7, 3, {})
+
+        class NoNet:
+            def get(self, *a, **kw):
+                raise AssertionError("no fetches")
+        with mock.patch.dict(os.environ, {streetmly.TOKEN_ENV: "MLY|tok"}):
+            streetmly.run_job(NoNet(), self.dir, 7, 3, FRAME, (0.0, 0.0, 1.0, 1.0), [("B1", np.asarray(WALL[None]))])
+
+    def test_no_token_no_file(self):
+        with mock.patch.dict(os.environ, {streetmly.TOKEN_ENV: ""}), mock.patch.object(
+                streetmly, "TOKEN_FILE", os.devnull + "_missing"):
+            streetmly.run_job(object(), self.dir, 7, 4, FRAME, (0.0, 0.0, 1.0, 1.0),
+                              [("B1", np.asarray(WALL[None]))])
+        self.assertIsNone(streetmly.colours_load(self.dir, 7, 4))

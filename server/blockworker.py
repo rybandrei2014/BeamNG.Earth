@@ -57,6 +57,7 @@ class _State:
         revisit.CACHE_DIR = cache_dir
         self.imagery = None         # (its settings, imagery.Imagery from the disk alone): far_tile's textures
         net = netfetch.Fetcher(offline=offline)
+        self.net = net              # (the shared polite fetcher: the --facade-colours street-photo job rides it)
         self.dem = demmod.Dem(os.path.join(cache_dir, "dem"), fetcher=net)
         import railways as _railways    # (coarse elevation: rail decks raised over the roads under them)
         _railways.COARSE_AT = self.dem.coarse_at
@@ -896,6 +897,7 @@ def _tile_parts(mark, frame, tile, zoom, g, buildings, left_hand, mph, gas_stati
             except Exception as ex:
                 log.debug("roof colours: imagery: %s: %s", type(ex).__name__, ex)
         facade_colors = None
+        facade_job = [] if facade and cache_dir is not None else None
         if facade and cache_dir is not None:
             # (--facade-colours: the finished file the background streetmly job left for this tile, if any:
             #  a tile built before the colours arrive keeps its predicted facades, the next visit wears them)
@@ -906,7 +908,9 @@ def _tile_parts(mark, frame, tile, zoom, g, buildings, left_hand, mph, gas_stati
                 log.debug("facade colours: tile %s_%s: %s: %s", tx, ty, type(ex).__name__, ex)
         items, _custom = buildingsmod.road_tile_items(frame, tx, ty, _s.md, elev, decks=_tile_decks(bridges, cells, tx, ty),
                                                       skip=skip, cache_dir=cache_dir, roof_im=roof_im,
-                                                      facade_colors=facade_colors)
+                                                      facade_colors=facade_colors, facade_job=facade_job)
+        if facade_job:
+            _facade_job(cache_dir, tx, ty, frame, box, facade_job)
         _bridge_fps = buildingsmod.bridge_footprints(frame, tx, ty, cache_dir)
         if any(m in {c["id"] for c in _custom} for _fp, _c, m in _bridge_fps):
             try:            # (the tile that bakes the model: where the mapped bridge meets the roads)
@@ -1682,6 +1686,36 @@ def _geo_exact(aid, lat, lon, gx, gy, out_dir, vfs_dir, parts):
         out[what] = f"{vfs_dir}/{name}"
         _geo_stats["exact"] += 1
     return out
+
+
+_facade_pool = None    # (--facade-colours: this process's one background street-photo job at a time)
+
+
+def _facade_job(cache_dir, tx, ty, frame, box, job):
+    """(--facade-colours: the walls this tile just built hand their colours to a background thread here: the
+    newest street photos, the earthfast kernel, the finished colour file for the next build. The tile being
+    built waits for none of it; a tile that already has the file, or a run without a token or offline, asks
+    for nothing (streetmly.run_job re-checks both at its start, where the fetches happen).)"""
+    global _facade_pool
+    try:
+        import streetmly
+        if streetmly.token() is None or streetmly.colours_load(cache_dir, tx, ty) is not None:
+            return
+        if _facade_pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+            _facade_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bnge-facade")
+
+        def work():
+            import pacer
+            pacer.enable()
+            try:
+                streetmly.run_job(_s.net, cache_dir, tx, ty, frame, box, job)
+            except Exception as ex:
+                log.debug("facade job %s_%s: %s: %s", tx, ty, type(ex).__name__, ex)
+
+        _facade_pool.submit(work)
+    except Exception as ex:
+        log.debug("facade job: %s: %s", type(ex).__name__, ex)
 
 
 def roads_geo(aid, lat, lon, zoom, gx, gy, gzoom, out_dir, vfs_dir, sidewalks, lift, buildings, left_hand, mph, q,

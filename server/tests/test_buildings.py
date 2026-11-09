@@ -1884,3 +1884,18 @@ class FacadeColorTest(unittest.TestCase):
         ring = self.ll(100, 100, 40, 40)
         b = Feats(["R"], [ring], **{"class": ["house"], "height": [6.0], "min_height": [np.nan]})
         self.assertEqual(self._facades(b, {"OTHER": self.HEX}), self._facades(b))
+
+    def test_the_job_lists_unmapped_walls(self):
+        ring = self.ll(100, 100, 40, 40)
+        b = Feats(["R"], [ring], **{"class": ["house"], "height": [6.0], "min_height": [np.nan]})
+        job = []
+        bld.tile_buildings(self.f, 0.0, 0.0, 256.0, 256.0, [b], lambda la, lo: np.zeros(np.shape(la)),
+                           facade_job=job)
+        self.assertEqual([k for k, _w in job], ["R"])
+        self.assertEqual(job[0][1].shape, (4, 4, 3), "four 40 m walls, ground to eave")
+        mapped = Feats(["M"], [ring], **{"class": ["house"], "height": [6.0], "min_height": [np.nan],
+                                         "facade_color": ["#00ff00"]})
+        job2 = []
+        bld.tile_buildings(self.f, 0.0, 0.0, 256.0, 256.0, [mapped], lambda la, lo: np.zeros(np.shape(la)),
+                           facade_job=job2)
+        self.assertEqual(job2, [], "a mapped facade colour is never a candidate")

@@ -298,6 +298,24 @@ def _area2(p):
     return float(np.dot(x, np.concatenate((y[1:], y[:1]))) - np.dot(np.concatenate((x[1:], x[:1])), y))
 
 
+MIN_WALL_M = 4.0       # an outline edge this short is a wall too thin to sample from a street photo
+
+
+def _wall_quads(ring, base, top):
+    """(W, 4, 3) the ring's walls in frame metres, each [ground a, ground b, eave b, eave a]: what the
+    --facade-colours background job projects into the street photos (streetmly.py, facadecolor.rs)."""
+    n = len(ring) - (1 if len(ring) > 1 and np.array_equal(ring[0], ring[-1]) else 0)
+    quads = []
+    for i in range(n):
+        ax, ay = float(ring[i][0]), float(ring[i][1])
+        j = (i + 1) % n
+        bx, by = float(ring[j][0]), float(ring[j][1])
+        if (bx - ax) ** 2 + (by - ay) ** 2 < MIN_WALL_M * MIN_WALL_M:
+            continue
+        quads.append([[ax, ay, base], [bx, by, base], [bx, by, top], [ax, ay, top]])
+    return np.asarray(quads, np.float64) if quads else None
+
+
 def clean_ring(p):
     """The ring (n, 2) without its closing point, duplicate and nearly collinear vertices, counter-clockwise;
     None if fewer than 3 are left. The simplification in Rust (earthfast.clean_ring_core: numpy's arithmetic)."""
@@ -2579,7 +2597,7 @@ def _outline_under_parts(at, bparts):
 def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=(), west_town=False, roads_xy=None,
                    tunnels_xy=None, garages_xy=None, supports=None, bridges_xy=None, water_xy=None, decks=None,
                    ml_roads_xy=None, ways_xy=None, skip=frozenset(), min_size=None, own=None, house_land_layers=(),
-                    roof_im=None, facade_colors=None):
+                    roof_im=None, facade_colors=None, facade_job=None):
     """[(Spec, gmin, gmax)] of the buildings whose footprint centroid is in the tile [x0, x1) x [y0, y1) (own: the
     tile's box when it says which points are its own, roads.box_owns: a geotile's)
     (anchor frame), rings relative to (x0, y0). layers: mapgeom.Features of buildings (one per map cell; a
@@ -2595,7 +2613,8 @@ def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=
     any other work on a building. roof_im: an imagery.Imagery (roofcolor.py, --roof-colors): the buildings with no
     mapped roof colour sample the tile's aerial photo; None (default): only mapped colours. facade_colors:
     {building id: "#rrggbb"} (streetmly.py, --facade-colours): the buildings with no mapped facade colour wear it;
-    None (default): only mapped colours."""
+    None (default): only mapped colours. facade_job: a list the --facade-colours job spec lands in (per unmapped
+    building: (id, (W, 4, 3) wall quads in frame metres)) for the background streetmly.run_job; None: no job."""
     parts_of = _PartsOf(frame, part_layers)     # building id -> [(ring in the anchor frame, (own height, bottom))]
     seen = set()
     rings, attrs, looks, mins = [], [], [], []
@@ -2708,6 +2727,10 @@ def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=
                         ridx.append((len(attrs) - 1, str(key), np.stack([e, n], 1)))
                     if fidx is not None and key is not None and not p_fcol:
                         fidx.append((len(attrs) - 1, str(key)))
+                    if facade_job is not None and key is not None and not p_fcol:
+                        q = _wall_quads(np.stack([e, n], 1), pmh, pmh + 0.85 * ph)
+                        if q is not None:
+                            facade_job.append((str(key), q))
                 if key is not None:
                     seen.add(key)
                 if not (PARTS_COVER_ON and _outline_under_parts(at, bparts)
@@ -2761,6 +2784,12 @@ def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=
                 ridx.append((len(attrs) - 1, str(key), np.stack([e, n], 1)))
             if fidx is not None and key is not None and not at.get("facade_color"):
                 fidx.append((len(attrs) - 1, str(key)))
+            if facade_job is not None and key is not None and not at.get("facade_color"):
+                hh = at.get("height")
+                hh = float(hh) if hh is not None and np.isfinite(hh) and float(hh) > mh + 1.0 else mh + 7.0
+                q = _wall_quads(np.stack([e, n], 1), mh, mh + 0.85 * (hh - mh))
+                if q is not None:
+                    facade_job.append((str(key), q))
     if not rings:
         return []
     if ridx:
@@ -3651,7 +3680,8 @@ def custom_models(frame, custom, ground, out_dir, vfs_dir, road_ends=None):
 
 
 def road_tile_items(
-    frame, tx, ty, md, ground, decks=None, skip=frozenset(), cache_dir=None, roof_im=None, facade_colors=None
+    frame, tx, ty, md, ground, decks=None, skip=frozenset(), cache_dir=None, roof_im=None, facade_colors=None,
+    facade_job=None
 ):
     """tile_buildings of road tile (tx, ty) (items, custom), from the map cells under it, plus any
     3dmr.eu models found near it by geo-search (threedmr.region_ids/model_position), appended to custom as
@@ -3717,6 +3747,7 @@ def road_tile_items(
         house_land_layers=[c.layers.get("land_use") for c in cds],
         roof_im=roof_im,
         facade_colors=facade_colors,
+        facade_job=facade_job,
     )
     custom = []
     if cache_dir is not None:
