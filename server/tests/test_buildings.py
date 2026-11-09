@@ -1755,3 +1755,87 @@ class ModelBridgeTest(unittest.TestCase):
         self.assertEqual(got, {})       # (the parts are near the origin, the model at x 1000: none under it)
         got = bld.bridge_road_ends([(self.FP, (0.0, 0.0), 22)], b, [])
         self.assertEqual(got, {22: [(-80.0, 2.0, 1.0), (90.0, 2.0, 2.0)]})
+
+
+class RoofColorTest(unittest.TestCase):
+    """--roof-colors (roofcolor.py): the tile's aerial photo colours the roofs nothing mapped, a mapped
+    building:roof_colour wins, and an unclear photo or a failing one leaves the predicted look untouched."""
+
+    PAINT = (170, 70, 60)          # -> c_0.667_0.275_0.235
+    HEX = "c_0.667_0.275_0.235"
+
+    def setUp(self):
+        import geodesy
+        import roofcolor
+        self.roofcolor = roofcolor
+        self.f = geodesy.EnuFrame(39.28, -76.59)
+
+        def ll(x, y, w, d):
+            e = np.array([x, x + w, x + w, x, x]); n = np.array([y, y, y + d, y + d, y])
+            la, lo, _ = self.f.enu_to_geodetic(e, n, 0.0)
+            return np.stack([lo, la], 1)
+        self.ll = ll
+
+    def im(self, paints, raises=None, box=(0.0, 0.0, 256.0, 256.0), px=256):
+        """A stand-in imagery.Imagery: [((x, y, w, d) tile metres, rgb)], painted through roofcolor's own
+        mapping (the tile box's, gutter and the raster's own size)."""
+        roofcolor = self.roofcolor
+        x0, y0, x1, y1 = box
+        rsize = max(x1 - x0, y1 - y0) + 2.0 * roofcolor.GUTTER_M
+        img = np.full((px, px, 3), 120, np.uint8)      # a neutral, non-green photo
+        s = px / rsize
+        for (px0, py0, pw, phd), rgb in paints:
+            u = np.clip(np.array([px0, px0 + pw] + [px0, px0 + pw]) - (x0 - roofcolor.GUTTER_M), 0, rsize) * s
+            v = np.clip((y0 - roofcolor.GUTTER_M + rsize) - np.array([py0, py0, py0 + phd, py0 + phd]), 0, rsize) * s
+            img[int(v.min()):int(v.max()) + 1, int(u.min()):int(u.max()) + 1] = rgb
+
+        class Im:
+            def render(self, frame, x, y, size, req):
+                if raises is not None:
+                    raise raises
+                return img, 1.0
+        return Im()
+
+    def _mats(self, feats, roof_im=None, box=(0.0, 0.0, 256.0, 256.0), **kw):
+        items = bld.tile_buildings(self.f, *box, [feats], lambda la, lo: np.zeros(np.shape(la)),
+                                   roof_im=roof_im, **kw)
+        return sorted(s.roof_mat for s, _, _ in items)
+
+    def test_the_photo_paints_an_unmapped_roof(self):
+        ring = self.ll(100, 100, 40, 40)
+        b = Feats(["R"], [ring], **{"class": ["house"], "height": [6.0], "min_height": [np.nan]})
+        plain = self._mats(b)
+        painted = self._mats(b, self.im([((100, 100, 40, 40), self.PAINT)]))
+        self.assertEqual(len(painted), len(plain))
+        self.assertTrue(any(self.HEX in m for m in painted), painted)
+        self.assertFalse(any(self.HEX in m for m in plain), "without the imagery: as before")
+
+    def test_a_mapped_roof_colour_wins(self):
+        ring = self.ll(100, 100, 40, 40)
+        b = Feats(["M"], [ring], **{"class": ["house"], "height": [6.0], "min_height": [np.nan],
+                                    "roof_color": ["#00ff00"]})
+        im = self.im([((100, 100, 40, 40), self.PAINT)])
+        self.assertEqual(self._mats(b, im), self._mats(b))
+        self.assertTrue(all("c_0.000_1.000_0.000" in m for m in self._mats(b)))
+
+    def test_a_roof_under_a_tree_stays_predicted(self):
+        ring = self.ll(100, 100, 40, 40)
+        b = Feats(["R"], [ring], **{"class": ["house"], "height": [6.0], "min_height": [np.nan]})
+        self.assertEqual(self._mats(b, self.im([((100, 100, 40, 40), (60, 200, 60))])), self._mats(b))
+
+    def test_a_failing_photo_keeps_everything(self):
+        ring = self.ll(100, 100, 40, 40)
+        b = Feats(["R"], [ring], **{"class": ["house"], "height": [6.0], "min_height": [np.nan]})
+        self.assertEqual(self._mats(b, self.im([], raises=RuntimeError("no photo"))), self._mats(b))
+
+    def test_a_building_drawn_in_parts_shares_the_colour(self):
+        ring = self.ll(-100, -125, 200, 250)
+        b = Feats(["B"], [ring], **{"class": ["retail"], "height": [10.0], "has_parts": [1.0],
+                                    "min_height": [np.nan]})
+        parts = Feats(["p1"], [self.ll(60, 60, 21, 22)], building_id=["B"], height=[5.0],
+                      min_height=[np.nan], num_floors=[np.nan], min_floor=[np.nan])
+        box = (-128.0, -128.0, 128.0, 128.0)
+        painted = self._mats(b, self.im([((-100, -125, 200, 250), self.PAINT)], box=box), box=box,
+                             part_layers=[parts])
+        self.assertEqual(len(painted), 2, "the part and the outline")
+        self.assertTrue(all(self.HEX in m for m in painted), painted)

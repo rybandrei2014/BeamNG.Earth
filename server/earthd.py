@@ -891,7 +891,7 @@ class Server:
                  colormatch="off", credits=None, cache=None, retex_rate=RETEX_RATE, surface=None,
                  mapdata=None, grading=False, road_widths=False, block_pools=(), sidewalks=True, buildings=False, traffic=False, far_pool=None,
                  road_pool=None, airports_db=None, sea=None, vegetation=None, leaf_on=True, season_mode="off",
-                 far_bld_pool=None, gas_stations=False, regional_poles="off"):
+                 far_bld_pool=None, gas_stations=False, regional_poles="off", roof_colors=False):
         """kfun: K(L) for every level (default: the layout's K table); near_radii: the min-level
         radii (default: the layout's); cells: 32 (v1.3.1) or 64 (M1, mesh mode only); tex: texture
         px per level from the finest (default: tex_near, tex_near, tex_far with 32 cells,
@@ -902,7 +902,8 @@ class Server:
         one of its own, no statistics file); colormatch: --colormatch (off, or s2: the colour-seam
         feather on the USGS tiles); cache: the download cache's cache.Cache (last use per file, the
         size cap, the page's 'cache' messages; None = no bookkeeping and no 'cache' message, Server()'s
-        default); retex_rate: --retex-rate (live retextures per second, 0 = none)."""
+        default); retex_rate: --retex-rate (live retextures per second, 0 = none); roof_colors: --roof-colors
+        (roofcolor.py: the buildings' roofs wear the colour of their own aerial photo)."""
         if os.environ.get("BNGE_WORLD_BUNDLE") and not (grading and mapdata is not None):
             from worldbundle import BundleError
             raise BundleError("Pinned road plans require roads and grading enabled")
@@ -1010,6 +1011,13 @@ class Server:
                         if imagery else None)
         if self.imagery is not None:        # (a quick texture's photos downloaded: its live re-render, _cm_ready)
             self.imagery.add_img_listener(self._cm_listener)
+        # (--roof-colors, roofcolor.py: the blockworker._imagery settings for sampling roofs out of the tile's own
+        #  aerial photo; None off (default) or without imagery: predicted colours, tiles as before)
+        self.roof_colors = bool(roof_colors) and self.imagery is not None
+        self.roof_tex = ({"chain": [s.name for s in self.imagery.chain], "tone": self.tone,
+                          "leaf_on": self.imagery.leaf_on, "season_mode": self.imagery.season_mode,
+                          "online": True} if self.roof_colors else None)
+        self.roof_im = self.imagery if self.roof_colors else None   # (build_roads_tile without the pool: here)
         self.imagery_failures = 0           # tiles that fell back to the palette (network trouble)
         self.imagery_worker = 0             # far textures the far-tile processes rendered (blockworker.far_tile)
         self.fin_worker_hits = deque(maxlen=FIN_WORKER_WINDOW)     # (fin_worker_worth: recent tries found them?)
@@ -2256,7 +2264,7 @@ class Server:
             blockworker.roads_geo, aid, anchor.lat, anchor.lon, anchor.zooms[0], gx, gy, gzoom, self.out_dir,
             self.vfs_dir, self.sidewalks, DETAIL_ROAD_LIFT if self.near_visual == "detail" else 0.0,
             self.buildings, lh, mph, self.anchor_q(anchor) if skin else None, self.gas_stations, buried, lamps,
-            country, content, skin, exact, Server.pole_profile(self))
+            country, content, skin, exact, Server.pole_profile(self), self.roof_tex)
         t0, waited = time.perf_counter(), []
         try:
             res = poolsmod.result_running(fut, ROAD_TILE_TIMEOUT_S, waited)
@@ -2293,7 +2301,8 @@ class Server:
         lh, mph, buried, lamps, country, gzoom = self.geo_rules(gx, gy)
         return blockworker._geo_content_key(geotiles.geobox(gx, gy).key, gzoom, self.buildings, lh, mph,
                                             self.gas_stations, buried, lamps, country, md=self.mapdata.versions(),
-                                            models_dir=self.root, pole_profile=Server.pole_profile(self))
+                                            models_dir=self.root, pole_profile=Server.pole_profile(self),
+                                            roof=bool(self.roof_tex))
 
     def geo_prebuilt(self, gx, gy):
         """Is geotile (gx, gy)'s road content in the revisit cache (no worker, no network)? -> its key or None."""
@@ -2342,7 +2351,7 @@ class Server:
         return poolsmod.result_running(submit(
             blockworker.prebuild_geo, gx, gy, gzoom, scratch, self.buildings, lh, mph, self.gas_stations, buried,
             lamps, country, "/temp/beamngEarth/areas_scratch", pole_profile=Server.pole_profile(self),
-            wait_gaps=fast is not None), timeout)
+            wait_gaps=fast is not None, roof_tex=self.roof_tex), timeout)
 
     def build_roads_tile(self, aid, tx, ty):
         """roads.py: one road tile of anchor aid, written to the session folder. Returns (vfs path,
@@ -2357,7 +2366,8 @@ class Server:
                 blockworker.roads_tile, aid, anchor.lat, anchor.lon, anchor.zooms[0], tx, ty, self.out_dir,
                 self.vfs_dir, self.sidewalks, DETAIL_ROAD_LIFT if self.near_visual == "detail" else 0.0,
                 self.buildings, self.left_hand(anchor), self.mph(anchor), self.anchor_q(anchor),
-                self.gas_stations, self.buried(anchor), self.lamp_region(anchor), self.country(anchor), Server.pole_profile(self, anchor))
+                self.gas_stations, self.buried(anchor), self.lamp_region(anchor), self.country(anchor), Server.pole_profile(self, anchor),
+                self.roof_tex)
             try:
                 # bounded: a worker that never answered held this thread and its roads.Tracker slot for good (4
                 # slots: four hung tiles and no road tile ever again, the loading line at "roads & buildings 0/26")
@@ -2414,7 +2424,7 @@ class Server:
             # (on the graded ground, as blockworker.roads_tile)
             items, _custom = buildingsmod.road_tile_items(anchor.frame, tx, ty, self.mapdata, elev,
                                                  decks=blockworker._tile_decks(anchor.bridges, cells, tx, ty), skip=skip,
-                                                 cache_dir=os.path.dirname(self.out_dir))
+                                                 cache_dir=os.path.dirname(self.out_dir), roof_im=self.roof_im)
             _bridge_fps = buildingsmod.bridge_footprints(anchor.frame, tx, ty, os.path.dirname(self.out_dir))
             if anchor.bridges is not None and any(m in {c["id"] for c in _custom} for _fp, _c, m in _bridge_fps):
                 try:
@@ -8516,7 +8526,8 @@ async def main_async(args):
                     road_widths=args.road_widths == "on" and args.roads == "on",
                     sidewalks=args.sidewalks == "on",
                     buildings=args.buildings == "on" and args.roads == "on",
-                    gas_stations=args.gas_stations == "on" and args.roads == "on",
+                     gas_stations=args.gas_stations == "on" and args.roads == "on",
+                     roof_colors=args.roof_colors == "on" and args.buildings == "on" and args.roads == "on",
                     regional_poles=args.regional_poles,
                     traffic=args.traffic == "on" and args.roads == "on",
                     block_pools=block_pools, far_pool=far_pool, road_pool=road_pool, airports_db=airports_db,
@@ -9112,6 +9123,10 @@ def main():
     ap.add_argument("--buildings", choices=("on", "off"), default="off",
                     help="3D buildings from the Overture footprints with the road tiles (buildings.py; needs --roads "
                          "on): heights and roofs predicted where the data has none")
+    ap.add_argument("--roof-colors", choices=("on", "off"), default="off",
+                    help="the buildings' roofs wear the colour of their own aerial photo (roofcolor.py; needs "
+                         "--buildings on): sampled per footprint from the imagery the ground already fetches, "
+                         "mapped roof colours unchanged, unclear roofs keep the predicted colour")
     ap.add_argument("--regional-poles", choices=("off", "fr-demo", "fr-all", "fr-varied", "europe"), default="off",
                     help="regional furniture: off=stock, fr-demo=50/50 poles, fr-all=concrete poles, "
                          "fr-varied=French kit; europe=country-specific European scenery and Quebec/Turkish STOP lettering; "

@@ -16,7 +16,7 @@ except ImportError:         # no binary for this platform / Python: require() sa
     _ef = None
 
 AVAILABLE = _ef is not None
-MIN_VERSION = 168 # the newest kernel signature the server calls (earthd checks it at start)
+MIN_VERSION = 169 # the newest kernel signature the server calls (earthd checks it at start)
 
 
 class NativeMissing(RuntimeError):
@@ -133,3 +133,14 @@ def md_html(text, base, fold_details=False):
     mdhtml.rs: our own tags only, links as indexes into the URL list; addons.py)."""
     require(166, "md_html")
     return _ef.md_html(str(text), str(base), bool(fold_details))
+
+
+def roof_sample(rgb, off, pts, params):
+    """(n, 5) per-building roof-colour rows from an imagery raster (native roofcolor.rs, server/roofcolor.py):
+    median r, g, b (0..255), coverage (kept / the ring's texels inside the image) and spread (84th - 16th
+    percentile); a nan row where too few texels survived. rgb: (h, w, 3) uint8 (row 0 north); off: (n + 1) ring
+    offsets into pts; pts: (P, 2) ring corners in raster px (col, row); params: erode_px, green_gap, shadow_max,
+    min_keep."""
+    require(169, "roof_sample")
+    return _ef.roof_sample(np.ascontiguousarray(rgb, np.uint8), np.asarray(off, np.int64),
+                           np.ascontiguousarray(pts, np.float64), np.asarray(params, np.float64))

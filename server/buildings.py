@@ -2578,7 +2578,8 @@ def _outline_under_parts(at, bparts):
 @profile_step('Building site selection')
 def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=(), west_town=False, roads_xy=None,
                    tunnels_xy=None, garages_xy=None, supports=None, bridges_xy=None, water_xy=None, decks=None,
-                   ml_roads_xy=None, ways_xy=None, skip=frozenset(), min_size=None, own=None, house_land_layers=()):
+                   ml_roads_xy=None, ways_xy=None, skip=frozenset(), min_size=None, own=None, house_land_layers=(),
+                   roof_im=None):
     """[(Spec, gmin, gmax)] of the buildings whose footprint centroid is in the tile [x0, x1) x [y0, y1) (own: the
     tile's box when it says which points are its own, roads.box_owns: a geotile's)
     (anchor frame), rings relative to (x0, y0). layers: mapgeom.Features of buildings (one per map cell; a
@@ -2590,11 +2591,13 @@ def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=
     OSM) on a road bridge, over water or on a public road (roads_xy, or ml_roads_xy for that test alone: the far
     buildings) is a deck, a boat or a vehicle, left out (_ml_false). skip: ids of buildings left out (a gas station's
     canopy, drawn by the mod from the stock levels' props: gasstations.tile_sites). min_size (min height m, min
-    footprint m²): only buildings at least that tall or that large (the skyline tiles: skyline_tile), tested before
-    any other work on a building."""
+    footprint m²?): only buildings at least that tall or that large (the skyline tiles: skyline_tile), tested before
+    any other work on a building. roof_im: an imagery.Imagery (roofcolor.py, --roof-colors): the buildings with no
+    mapped roof colour sample the tile's aerial photo; None (default): only mapped colours."""
     parts_of = _PartsOf(frame, part_layers)     # building id -> [(ring in the anchor frame, (own height, bottom))]
     seen = set()
     rings, attrs, looks, mins = [], [], [], []
+    ridx = [] if roof_im is not None else None  # (attr idx, building id, outline ring): the --roof-colors pass)
     for f in layers:
         if f is None or len(f.kind) == 0:
             continue
@@ -2698,6 +2701,8 @@ def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=
                                   .lower() not in STEEL_MATERIALS else None})
                     looks.append(look)
                     mins.append(pmh)
+                    if ridx is not None and key is not None and not p_rcol:
+                        ridx.append((len(attrs) - 1, str(key), np.stack([e, n], 1)))
                 if key is not None:
                     seen.add(key)
                 if not (PARTS_COVER_ON and _outline_under_parts(at, bparts)
@@ -2747,8 +2752,24 @@ def tile_buildings(frame, x0, y0, x1, y1, layers, elev, water=None, part_layers=
             attrs.append(at)
             looks.append(None)
             mins.append(mh)
+            if ridx is not None and key is not None and not at.get("roof_color"):
+                ridx.append((len(attrs) - 1, str(key), np.stack([e, n], 1)))
     if not rings:
         return []
+    if ridx:
+        # (--roof-colors, roofcolor.py: the roofs the tile's aerial photo clearly shows wear their colour, through
+        #  the same roof_color -> custom_look path a mapped building:roof_colour takes; a mapped one is never a
+        #  candidate. The imagery missing or failing keeps every roof as it was predicted.)
+        try:
+            import roofcolor
+            hexes = roofcolor.tile_estimate(roof_im, frame, x0, y0, x1, y1, ridx)
+            for ridx_i, rkey, _ring in ridx:
+                c = hexes.get(rkey)
+                if c is not None:
+                    attrs[ridx_i] = dict(attrs[ridx_i], roof_color=c)
+        except Exception as ex:
+            import logging
+            logging.getLogger("earthd.buildings").debug("roof colours: %s: %s", type(ex).__name__, ex)
     # a quay structure alongside a moored ship: a low deck (its scanned height is the ship's flank). The ship may be
     # the next tile's: those are looked for only when this tile has water and a long thin candidate
     piers = [k_ for k_, (r, at) in enumerate(zip(rings, attrs)) if not at.get("ship") and not at.get("ml")
@@ -3614,7 +3635,7 @@ def custom_models(frame, custom, ground, out_dir, vfs_dir, road_ends=None):
 
 
 def road_tile_items(
-    frame, tx, ty, md, ground, decks=None, skip=frozenset(), cache_dir=None
+    frame, tx, ty, md, ground, decks=None, skip=frozenset(), cache_dir=None, roof_im=None
 ):
     """tile_buildings of road tile (tx, ty) (items, custom), from the map cells under it, plus any
     3dmr.eu models found near it by geo-search (threedmr.region_ids/model_position), appended to custom as
@@ -3678,6 +3699,7 @@ def road_tile_items(
         else None,
         skip=skip,
         house_land_layers=[c.layers.get("land_use") for c in cds],
+        roof_im=roof_im,
     )
     custom = []
     if cache_dir is not None:
