@@ -76,6 +76,7 @@ ELEVATION = {
                      "2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
 }
 WEATHER_ID = "wx:open-meteo"
+STREET_ID = "mly:mapillary"    # (--facade-colours: the street photos behind a facade colour, streetmly.py)
 
 # The overlay's short names (the user, 2026-10-18: "trim down the amount of text we use to credit a single source").
 # The full wordings above stay the attribution of record: hello.attribution (the settings page) and CREDITS.md.
@@ -97,7 +98,7 @@ SHORT = {
     f"dem:{demmod.MAPTERHORN['name']}": "Mapterhorn", f"dem:{demmod.AWS['name']}": "AWS Terrain Tiles / Mapzen",
     f"dem:{polardem.SOURCE}": "Copernicus DEM (DLR, Airbus)",
     "dem:hrdem": "NRCan HRDEM (OGL-Canada)", "dem:lidarbc": "LidarBC (OGL-BC)",
-    WEATHER_ID: "Open-Meteo",
+    WEATHER_ID: "Open-Meteo", STREET_ID: "Mapillary contributors",
 }
 # Every other source that built what is near the player (the user, 2026-10-18: "show all sources", not only those
 # that ask for credit): the map data's datasets (the cells' provenance), land cover, canopy, sea depth, bridge types,
@@ -116,10 +117,12 @@ SHORT.update(FEATURES)
 GROUPS = [("img", "Imagery", "Far imagery"), ("dem", "Elevation", "Far elevation"), ("map", "Map", "Far map"),
           ("land", "Land cover", "Far land cover"), ("canopy", "Trees", "Far trees"), ("sea", "Sea depth", "Far sea"),
           ("bridge", "Bridges", "Far bridges"), ("model", "3D models", "Far 3D models"),
-          ("air", "Airports", "Far airports"), ("wx", "Weather", "Far weather"),
-          ("grav", "Gravity", "Far gravity"), ("climate", "Climate", "Far climate")]
+           ("air", "Airports", "Far airports"), ("wx", "Weather", "Far weather"),
+           ("grav", "Gravity", "Far gravity"), ("climate", "Climate", "Far climate"),
+           ("mly", "Street colours", "Far street colours")]
 # Display order of the ids (unknown ones follow, by name)
-ORDER = ([f"img:{n}" for n in IMAGERY] + [f"dem:{n}" for n in ELEVATION] + list(FEATURES) + [WEATHER_ID])
+ORDER = ([f"img:{n}" for n in IMAGERY] + [f"dem:{n}" for n in ELEVATION] + list(FEATURES) + [WEATHER_ID,
+                                                                                             STREET_ID])
 
 
 # Imagery.render's counts that are no source: the fallback colour, the relit and colour-matched shares, the leaf-off
@@ -144,6 +147,8 @@ def full_label(i):
         return ELEVATION.get(name, name)
     if i == WEATHER_ID:
         return weathermod.CREDIT
+    if i == STREET_ID:
+        return "Facade colours from Mapillary contributors (CC BY-SA 4.0)"
     return FEATURES.get(i, name)
 
 
@@ -325,8 +330,10 @@ class Credits:
     """The server's credits setting (earthd --credits on): the near radius and its hysteresis, the
     throttle and the clock (injectable for tests)."""
 
-    def __init__(self, near_m=NEAR_M, interval=INTERVAL_S, clock=time.monotonic, hyst_m=NEAR_HYST_M):
+    def __init__(self, near_m=NEAR_M, interval=INTERVAL_S, clock=time.monotonic, hyst_m=NEAR_HYST_M,
+                 facade=False):
         self.near_m, self.interval, self.clock, self.hyst_m = near_m, interval, clock, hyst_m
+        self.facade = facade          # (--facade-colours on: every built facade credits the street photos)
 
     def message(self, conn, near_before=()):
         """The 'credits' message for a connection's shown tiles around its player, or None before
@@ -358,6 +365,8 @@ class Credits:
             return None
         if conn.weather.msg is not None:
             near.add(WEATHER_ID)
+        if self.facade:
+            near.add(STREET_ID)       # (a server-wide look: which exact building wore one is not in the tiles)
         try:
             near |= feature_ids(conn)
         except Exception:               # (a bug here must not lose the imagery credits)

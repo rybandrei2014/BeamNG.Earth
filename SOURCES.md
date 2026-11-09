@@ -36,6 +36,7 @@ For the OpenStreetMap keys read by the server and weekly data builders, see the
 | Overture Maps (second copy, on Azure) | `overturemapswestus2.blob.core.windows.net` | The same data, used when the first copy does not answer. | Only matters while the first copy is down too. | named |
 | Overture Maps file index | `stac.overturemaps.org` | The list of which file holds which part of the world. | The app carries its own copy of the list, which is used instead. | named |
 | OpenStreetMap road details (OSM US Layercake) | `data.openstreetmap.us` | OpenStreetMap's own road tags matched to the roads: lanes, widths, sidewalks, surfaces, speed limits, roads under construction. | Roads keep their width, lane and sidewalk estimates from their class and the land around them. | optional |
+| Mapillary street photos | `graph.mapillary.com` | Only with earthd `--facade-colours on`: the colour of building facades around you, sampled from the newest contributor photos of those walls with your own free client token (the game's settings or `$BNGE_MAPILLARY_TOKEN`). Only the extracted colour is kept, never the photos. | The facades wear their predicted colours. | optional |
 
 ## Terrain heights (elevation)
 

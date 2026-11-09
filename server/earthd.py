@@ -8521,7 +8521,9 @@ async def main_async(args):
                              if args.weather == "on" else None),
                     gravity=(gravitymod.Provider(os.path.join(args.cache_dir, "gravity"), net=net)
                              if args.gravity == "on" else None), net=net,
-                    credits=creditsmod.Credits() if args.credits == "on" else None, cache=disk,
+                    credits=creditsmod.Credits(
+                        facade=args.facade_colors == "on" and args.buildings == "on" and args.roads == "on"
+                    ) if args.credits == "on" else None, cache=disk,
                     retex_rate=args.retex_rate,
                     surface=(surfacemod.Surface(mapdata) if args.surface == "on" else None),
                     mapdata=mapdata if args.roads == "on" else None,

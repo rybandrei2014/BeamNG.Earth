@@ -124,6 +124,7 @@ only, nothing redistributed. Licence notes marked *(verify)* must be re-checked 
 | USGS 3DEP lidar point clouds | U.S. Geological Survey | building heights/roofs and canopy in the US | public domain | "USGS 3DEP" | planned |
 | LiDAR HD | IGN France | buildings, canopy heights | Etalab Open Licence 2.0 | "IGN - LiDAR HD" | planned |
 | Mapillary street-level imagery | Mapillary (Meta) | tuning the city generator against real photos | CC BY-SA 4.0, free API token | "Street-level imagery: Mapillary" | planned (reference) |
+| Mapillary street-level imagery | Mapillary (Meta) | facade colours from the walls' own photos (earthd `--facade-colours`, the player's own token; only the colours kept) | CC BY-SA 4.0, free API token | "Street colours: Mapillary contributors" | in use (off by default; re-verify the API terms before release) |
 
 ## Software and libraries
 
